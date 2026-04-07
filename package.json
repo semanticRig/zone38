@@ -1,0 +1,34 @@
+{
+  "name": "slopguard",
+  "version": "0.1.0",
+  "description": "Detects AI slop in your codebase before your tech lead does.",
+  "main": "src/index.js",
+  "bin": {
+    "slopguard": "bin/slopguard.js"
+  },
+  "scripts": {
+    "test": "node test/run.js",
+    "selfcheck": "node bin/slopguard.js . --verbose"
+  },
+  "keywords": [
+    "ai",
+    "slop",
+    "detection",
+    "code-quality",
+    "lint",
+    "security"
+  ],
+  "author": "slopguard contributors",
+  "license": "MIT",
+  "files": [
+    "bin/",
+    "src/",
+    "corpus/",
+    "templates/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

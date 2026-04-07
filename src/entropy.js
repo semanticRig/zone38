@@ -77,9 +77,10 @@ var SAFE_PATTERNS = [
   /^https?:\/\//,                                                       // URLs
   /^\/.+\/[gimsuvy]*$/,                                                  // regex patterns
   /^data:[a-z]+\/[a-z]+;base64,/,                                       // data URIs
-  /^[A-Za-z\s.,!?;:'"()-]+$/,                                           // English prose
+  /^[A-Za-z\s.,!?;:'"()\-\/#%&@+=${}\[\]\\|*<>~^]+$/,                 // Prose/template text
   /^\s+$/,                                                               // whitespace only
-  /^(\.\/|\.\.\/|\/)/,                                                   // file paths
+  /^(\.\/|\.\.\/|\/)./,                                                  // file paths
+  /\$\{[^}]+\}/,                                                         // template literals with interpolation
 ];
 
 /**
@@ -108,6 +109,8 @@ function analyzeLineEntropy(line, lineNumber) {
 
   for (var i = 0; i < strings.length; i++) {
     var str = strings[i];
+    // Template literals with interpolation are code expressions, not secrets
+    if (str.quote === '`' && /\$\{/.test(str.value)) continue;
     if (isSafeString(str.value)) continue;
 
     var charset = detectCharset(str.value);

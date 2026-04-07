@@ -51,6 +51,7 @@ var scorer = require('../src/scorer');
 
 var verbose = args.includes('--verbose');
 var jsonMode = args.includes('--json');
+var mcpMode = args.includes('--mcp');
 
 // Find the target path (first non-flag argument)
 var targetPath = null;
@@ -67,7 +68,7 @@ if (!targetPath) {
 }
 
 // --- Run the scan ---
-var scanResult = scanner.scanAll(targetPath);
+var scanResult = scanner.scanAll(targetPath, { mcp: mcpMode });
 var project = scanResult.project;
 
 // --- Roast messages for high scores ---
@@ -117,6 +118,7 @@ if (jsonMode) {
     fileCount: project.fileCount,
     totalHits: project.totalHits,
     totalEntropyFindings: project.totalEntropyFindings,
+    totalMCPFindings: project.totalMCPFindings || 0,
     files: scanResult.files.map(function (fr) {
       var scored = scorer.scoreFile(fr);
       return {
@@ -141,6 +143,7 @@ if (jsonMode) {
         compression: fr.compression,
       };
     }),
+    mcpFindings: scanResult.mcpFindings || [],
   };
   process.stdout.write(JSON.stringify(jsonOutput, null, 2) + '\n');
   process.exit(project.score > 50 ? 1 : 0);
@@ -159,7 +162,7 @@ w.write('\n');
 var projColor = scoreColor(project.score);
 var bar = projColor + BOLD + '  ' + project.verdict.emoji + ' Project Score: ' + project.score + '/100 — ' + project.verdict.label + RESET;
 w.write(bar + '\n');
-w.write('  ' + DIM + project.fileCount + ' files scanned | ' + project.totalHits + ' pattern hits | ' + project.totalEntropyFindings + ' entropy findings' + RESET + '\n');
+w.write('  ' + DIM + project.fileCount + ' files scanned | ' + project.totalHits + ' pattern hits | ' + project.totalEntropyFindings + ' entropy findings' + (mcpMode ? ' | ' + (project.totalMCPFindings || 0) + ' MCP findings' : '') + RESET + '\n');
 w.write('\n');
 
 // Roast
@@ -214,6 +217,19 @@ for (var j = 0; j < sortedScores.length; j++) {
 }
 
 w.write('\n');
+
+// MCP findings section
+if (mcpMode && scanResult.mcpFindings && scanResult.mcpFindings.length > 0) {
+  w.write('  ' + BOLD + 'MCP Configuration Findings:' + RESET + '\n\n');
+  for (var m = 0; m < scanResult.mcpFindings.length; m++) {
+    var mf = scanResult.mcpFindings[m];
+    var mSevC = severityColor(mf.severity);
+    w.write('    ' + mSevC + '[sev ' + mf.severity + ']' + RESET + ' ' + mf.name + '\n');
+    w.write('    ' + DIM + mf.configFile + ' → ' + mf.path + RESET + '\n');
+    w.write('    ' + DIM + 'Value: ' + mf.value + RESET + '\n');
+    w.write('    ' + GREEN + '\u21B3 ' + mf.fix + RESET + '\n\n');
+  }
+}
 
 // Score breakdown
 if (verbose) {

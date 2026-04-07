@@ -1,0 +1,16 @@
+{
+  "servers": {
+    "safe-server": {
+      "command": "node",
+      "args": ["./server.js"],
+      "url": "https://api.example.com/mcp",
+      "tools": ["read_file", "search"]
+    },
+    "local-dev": {
+      "command": "node",
+      "args": ["./dev-server.js"],
+      "url": "http://localhost:3000/mcp",
+      "tools": ["list_dir"]
+    }
+  }
+}

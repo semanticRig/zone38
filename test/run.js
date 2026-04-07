@@ -302,6 +302,58 @@ assert(scanResult.project.fileScores.length === scanResult.project.fileCount, 'f
 var selfScan = scanner.scanAll(path.join(__dirname, '..'));
 assert(selfScan.project.score < 25, 'slopguard self-scan score < 25 (got ' + selfScan.project.score + ')');
 
+// --- MCP config scanner ---
+section('MCP config scanner');
+
+var mcpFixtureDir = path.join(fixturesDir, 'mcp-project');
+var mcpCleanDir = path.join(fixturesDir, 'mcp-clean');
+
+// Risky MCP config should produce findings
+var riskyFindings = scanner.scanMCPConfig(mcpFixtureDir);
+assert(riskyFindings.length > 0, 'risky MCP config produces findings (got ' + riskyFindings.length + ')');
+
+// Check for specific risky patterns
+var shellFound = riskyFindings.some(function (f) { return f.id === 'mcp-shell-exec'; });
+assert(shellFound, 'detects shell exec in MCP config');
+
+var keyFound = riskyFindings.some(function (f) { return f.id === 'mcp-hardcoded-key'; });
+assert(keyFound, 'detects hardcoded API key in MCP config');
+
+var httpFound = riskyFindings.some(function (f) { return f.id === 'mcp-insecure-http'; });
+assert(httpFound, 'detects insecure HTTP endpoint in MCP config');
+
+var wildcardFound = riskyFindings.some(function (f) { return f.id === 'mcp-wildcard-permissions'; });
+assert(wildcardFound, 'detects wildcard permissions in MCP config');
+
+// Each finding has required shape
+for (var mIdx = 0; mIdx < riskyFindings.length; mIdx++) {
+  var mf = riskyFindings[mIdx];
+  assert(typeof mf.id === 'string', 'MCP finding has id');
+  assert(typeof mf.name === 'string', 'MCP finding has name');
+  assert(typeof mf.severity === 'number', 'MCP finding has severity');
+  assert(typeof mf.fix === 'string', 'MCP finding has fix');
+  assert(typeof mf.configFile === 'string', 'MCP finding has configFile');
+  assert(typeof mf.path === 'string', 'MCP finding has path');
+}
+
+// Clean MCP config should produce zero findings
+var cleanFindings = scanner.scanMCPConfig(mcpCleanDir);
+assert(cleanFindings.length === 0, 'clean MCP config produces zero findings (got ' + cleanFindings.length + ')');
+
+// Non-existent MCP config should produce zero findings
+var noMCPFindings = scanner.scanMCPConfig(fixturesDir);
+assert(noMCPFindings.length === 0, 'directory without MCP configs produces zero findings');
+
+// scanAll with mcp option should include mcpFindings
+var mcpScanResult = scanner.scanAll(mcpFixtureDir, { mcp: true });
+assert(mcpScanResult.mcpFindings !== undefined, 'scanAll with mcp returns mcpFindings');
+assert(mcpScanResult.mcpFindings.length > 0, 'scanAll with mcp has findings for risky config');
+assert(typeof mcpScanResult.project.totalMCPFindings === 'number', 'project score includes totalMCPFindings');
+
+// scanAll without mcp option should have empty mcpFindings
+var noMCPScanResult = scanner.scanAll(mcpFixtureDir);
+assert(noMCPScanResult.mcpFindings.length === 0, 'scanAll without mcp has no MCP findings');
+
 // --- Summary ---
 process.stdout.write('\n' + passed + ' passed, ' + failed + ' failed\n');
 process.exit(failed > 0 ? 1 : 0);

@@ -217,18 +217,153 @@ function scanFile(filePath, basePath) {
   };
 }
 
+// MCP config file paths to check (relative to project root)
+var MCP_CONFIG_PATHS = [
+  '.vscode/settings.json',
+  '.vscode/mcp.json',
+  '.cursor/mcp.json',
+];
+
+// Patterns that indicate risky MCP server configurations
+var MCP_RISKY_PATTERNS = [
+  {
+    id: 'mcp-shell-exec',
+    name: 'MCP shell command execution',
+    severity: 9,
+    test: function (key, value) {
+      if (typeof value !== 'string') return false;
+      var lower = value.toLowerCase();
+      return key === 'command' && (/\b(bash|sh|zsh|cmd|powershell|exec|eval)\b/).test(lower);
+    },
+    fix: 'Avoid shell execution in MCP server configs. Use direct binary paths instead.',
+  },
+  {
+    id: 'mcp-hardcoded-key',
+    name: 'Hardcoded API key in MCP config',
+    severity: 10,
+    test: function (_key, value) {
+      if (typeof value !== 'string') return false;
+      return (/^(sk-|ghp_|gho_|github_pat_|xox[bpsa]-|AKIA|glpat-|Bearer\s)/i).test(value) ||
+        (/['\"]?(api[_-]?key|secret|token|password|auth)['\"]?\s*[:=]\s*['\"]?[A-Za-z0-9+/=_-]{16,}/i).test(value);
+    },
+    fix: 'Move API keys to environment variables. Never hardcode secrets in config files.',
+  },
+  {
+    id: 'mcp-insecure-http',
+    name: 'Insecure HTTP endpoint in MCP config',
+    severity: 7,
+    test: function (key, value) {
+      if (typeof value !== 'string') return false;
+      return (key === 'url' || key === 'endpoint' || key === 'baseUrl' || key === 'uri') &&
+        value.indexOf('http://') === 0 && value.indexOf('http://localhost') !== 0 && value.indexOf('http://127.0.0.1') !== 0;
+    },
+    fix: 'Use HTTPS for remote MCP server endpoints. HTTP is only acceptable for localhost.',
+  },
+  {
+    id: 'mcp-wildcard-permissions',
+    name: 'Overly broad MCP tool permissions',
+    severity: 8,
+    test: function (key, value) {
+      if (typeof value !== 'string') return false;
+      return (key === 'tools' || key === 'permissions' || key === 'allow') && value === '*';
+    },
+    fix: 'Restrict MCP tool permissions to specific tools. Avoid wildcard (*) access.',
+  },
+];
+
+/**
+ * Recursively walks a JSON value and calls visitor(key, value, path) for every leaf.
+ */
+function walkJSON(obj, visitor, currentPath) {
+  currentPath = currentPath || '';
+  if (obj === null || obj === undefined) return;
+
+  if (Array.isArray(obj)) {
+    for (var i = 0; i < obj.length; i++) {
+      walkJSON(obj[i], visitor, currentPath + '[' + i + ']');
+    }
+  } else if (typeof obj === 'object') {
+    var keys = Object.keys(obj);
+    for (var k = 0; k < keys.length; k++) {
+      var key = keys[k];
+      var childPath = currentPath ? currentPath + '.' + key : key;
+      visitor(key, obj[key], childPath);
+      walkJSON(obj[key], visitor, childPath);
+    }
+  }
+}
+
+/**
+ * Scans MCP configuration files for risky patterns.
+ * Returns an array of findings: { id, name, severity, fix, configFile, path, value }
+ */
+function scanMCPConfig(targetPath) {
+  var resolvedTarget = path.resolve(targetPath);
+  var findings = [];
+
+  for (var i = 0; i < MCP_CONFIG_PATHS.length; i++) {
+    var configPath = path.join(resolvedTarget, MCP_CONFIG_PATHS[i]);
+    var content;
+
+    try {
+      content = fs.readFileSync(configPath, 'utf8');
+    } catch (err) {
+      // Config file does not exist or cannot be read — skip
+      continue;
+    }
+
+    var parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch (err) {
+      // Malformed JSON — skip
+      continue;
+    }
+
+    var relativeConfigPath = MCP_CONFIG_PATHS[i];
+
+    walkJSON(parsed, function (key, value, jsonPath) {
+      for (var r = 0; r < MCP_RISKY_PATTERNS.length; r++) {
+        var pattern = MCP_RISKY_PATTERNS[r];
+        if (pattern.test(key, value)) {
+          findings.push({
+            id: pattern.id,
+            name: pattern.name,
+            severity: pattern.severity,
+            fix: pattern.fix,
+            configFile: relativeConfigPath,
+            path: jsonPath,
+            value: typeof value === 'string' ? value.substring(0, 80) : String(value),
+          });
+        }
+      }
+    });
+  }
+
+  return findings;
+}
+
 /**
  * Scans all discovered files and returns per-file results.
+ * When mcpEnabled is true, also scans MCP configurations.
  */
-function scanAll(targetPath) {
+function scanAll(targetPath, options) {
+  options = options || {};
   var files = discoverFiles(targetPath);
   var fileResults = files.map(function (f) {
     return scanFile(f.filePath, targetPath);
   });
-  var projectScore = scorer.scoreProject(fileResults);
+
+  var mcpFindings = [];
+  if (options.mcp) {
+    mcpFindings = scanMCPConfig(targetPath);
+  }
+
+  var projectScore = scorer.scoreProject(fileResults, mcpFindings);
   return {
     files: fileResults,
     project: projectScore,
+    mcpFindings: mcpFindings,
   };
 }
 
@@ -237,8 +372,10 @@ module.exports = {
   discoverFiles: discoverFiles,
   scanFile: scanFile,
   scanAll: scanAll,
+  scanMCPConfig: scanMCPConfig,
   isBackendFile: isBackendFile,
   isFrontendFile: isFrontendFile,
   SCAN_EXTENSIONS: SCAN_EXTENSIONS,
   SKIP_DIRS: SKIP_DIRS,
+  MCP_CONFIG_PATHS: MCP_CONFIG_PATHS,
 };

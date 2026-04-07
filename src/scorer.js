@@ -113,15 +113,22 @@ function scoreFile(fileResult) {
 /**
  * Scores an entire project from an array of file scan results.
  * Aggregates across all files, weighted by lines of code.
+ * Optional mcpFindings array adds project-level MCP risk.
  */
-function scoreProject(fileResults) {
+function scoreProject(fileResults, mcpFindings) {
+  var mFindings = mcpFindings || [];
+  var mScore = mcpScore(mFindings);
+
   if (!fileResults || fileResults.length === 0) {
+    // Even with no files, MCP findings may contribute a score
+    var emptyScore = mScore > 0 ? Math.round(mScore * WEIGHTS.mcp) : 0;
     return {
-      score: 0,
-      verdict: getVerdict(0),
+      score: Math.min(100, emptyScore),
+      verdict: getVerdict(emptyScore),
       fileCount: 0,
       totalHits: 0,
       totalEntropyFindings: 0,
+      totalMCPFindings: mFindings.length,
       fileScores: [],
     };
   }
@@ -159,6 +166,12 @@ function scoreProject(fileResults) {
   }
 
   var projectScore = totalLines > 0 ? Math.round(totalWeightedScore / totalLines) : 0;
+
+  // Factor in project-level MCP findings
+  if (mScore > 0) {
+    projectScore = Math.round(projectScore * (1 - WEIGHTS.mcp) + mScore * WEIGHTS.mcp);
+  }
+
   projectScore = Math.max(0, Math.min(100, projectScore));
 
   return {
@@ -167,6 +180,7 @@ function scoreProject(fileResults) {
     fileCount: fileResults.length,
     totalHits: totalHits,
     totalEntropyFindings: totalEntropyFindings,
+    totalMCPFindings: mFindings.length,
     fileScores: fileScores,
   };
 }

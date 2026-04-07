@@ -82,6 +82,62 @@ var nodeModuleFiles = projectFiles.filter(function (f) {
 });
 assert(nodeModuleFiles.length === 0, 'walkDir skips node_modules');
 
+// --- Rule detection: sloppy fixture ---
+section('Rule detection — sloppy.js');
+
+var sloppyResult = scanner.scanFile(path.join(fixturesDir, 'sloppy.js'), fixturesDir);
+var sloppyHits = sloppyResult.hits;
+var sloppyIds = sloppyHits.map(function (h) { return h.ruleId; });
+
+function hasRule(ids, ruleId) {
+  return ids.indexOf(ruleId) !== -1;
+}
+
+assert(sloppyHits.length >= 10, 'sloppy.js triggers at least 10 hits (got ' + sloppyHits.length + ')');
+assert(hasRule(sloppyIds, 'hallucinated-import-require'), 'detects hallucinated require');
+assert(hasRule(sloppyIds, 'todo-fixme-comment'), 'detects TODO/FIXME');
+assert(hasRule(sloppyIds, 'hardcoded-secret'), 'detects hardcoded secret');
+assert(hasRule(sloppyIds, 'commented-out-code'), 'detects commented-out code');
+assert(hasRule(sloppyIds, 'unnecessary-abstraction-factory'), 'detects factory pattern');
+assert(hasRule(sloppyIds, 'async-without-await'), 'detects async without await');
+assert(hasRule(sloppyIds, 'verbose-null-check'), 'detects verbose null check');
+assert(hasRule(sloppyIds, 'console-log-leftover'), 'detects console.log');
+assert(hasRule(sloppyIds, 'debugger-statement'), 'detects debugger statement');
+assert(hasRule(sloppyIds, 'alert-statement'), 'detects alert()');
+assert(hasRule(sloppyIds, 'eval-usage'), 'detects eval()');
+assert(hasRule(sloppyIds, 'excessive-ternary-nesting'), 'detects nested ternary');
+assert(hasRule(sloppyIds, 'empty-catch-block'), 'detects empty catch block');
+assert(hasRule(sloppyIds, 'innerhtml-usage'), 'detects innerHTML');
+
+// --- Rule detection: clean fixture ---
+section('Rule detection — clean.js');
+
+var cleanResult = scanner.scanFile(path.join(fixturesDir, 'clean.js'), fixturesDir);
+assert(cleanResult.hits.length === 0, 'clean.js triggers zero hits (got ' + cleanResult.hits.length + ')');
+
+// --- Rule detection: context confusion ---
+section('Rule detection — server/confused.js');
+
+var confusedResult = scanner.scanFile(path.join(fixturesDir, 'server', 'confused.js'), fixturesDir);
+var confusedIds = confusedResult.hits.map(function (h) { return h.ruleId; });
+
+assert(confusedResult.isBackend, 'server/confused.js classified as backend');
+assert(hasRule(confusedIds, 'localstorage-in-backend'), 'detects localStorage in backend');
+assert(hasRule(confusedIds, 'document-in-backend'), 'detects document in backend');
+assert(hasRule(confusedIds, 'window-in-backend'), 'detects window in backend');
+
+// --- Hit object shape ---
+section('Hit object shape');
+
+var sampleHit = sloppyHits[0];
+assert(typeof sampleHit.ruleId === 'string', 'hit has ruleId');
+assert(typeof sampleHit.ruleName === 'string', 'hit has ruleName');
+assert(typeof sampleHit.category === 'string', 'hit has category');
+assert(typeof sampleHit.severity === 'number', 'hit has severity');
+assert(typeof sampleHit.line === 'string', 'hit has line');
+assert(typeof sampleHit.lineNumber === 'number', 'hit has lineNumber');
+assert(typeof sampleHit.fix === 'string', 'hit has fix');
+
 // --- Summary ---
 process.stdout.write('\n' + passed + ' passed, ' + failed + ' failed\n');
 process.exit(failed > 0 ? 1 : 0);

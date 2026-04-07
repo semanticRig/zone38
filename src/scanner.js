@@ -2,6 +2,7 @@
 
 var fs = require('fs');
 var path = require('path');
+var rules = require('./rules');
 
 // Directories to always skip during file discovery
 var SKIP_DIRS = [
@@ -146,9 +147,77 @@ function discoverFiles(targetPath) {
   });
 }
 
+/**
+ * Scans a single file against all pattern rules.
+ * Returns { filePath, relativePath, isBackend, isFrontend, hits[] }
+ * Each hit: { ruleId, ruleName, category, severity, line, lineNumber, fix }
+ */
+function scanFile(filePath, basePath) {
+  var content;
+  try {
+    content = fs.readFileSync(filePath, 'utf8');
+  } catch (err) {
+    return { filePath: filePath, hits: [], error: err.message };
+  }
+
+  var lines = content.split('\n');
+  var relativePath = basePath ? path.relative(path.resolve(basePath), filePath) : path.basename(filePath);
+  var isBackend = isBackendFile(relativePath || filePath);
+  var isFrontend = isFrontendFile(relativePath || filePath);
+
+  var ctx = {
+    filePath: filePath,
+    fileName: path.basename(filePath),
+    lines: lines,
+    lineIndex: 0,
+    isBackend: isBackend,
+    isFrontend: isFrontend,
+  };
+
+  var hits = [];
+
+  for (var i = 0; i < lines.length; i++) {
+    ctx.lineIndex = i;
+    for (var r = 0; r < rules.length; r++) {
+      var rule = rules[r];
+      if (rule.test(lines[i], ctx)) {
+        hits.push({
+          ruleId: rule.id,
+          ruleName: rule.name,
+          category: rule.category,
+          severity: rule.severity,
+          line: lines[i],
+          lineNumber: i + 1,
+          fix: rule.fix,
+        });
+      }
+    }
+  }
+
+  return {
+    filePath: filePath,
+    relativePath: relativePath || path.basename(filePath),
+    isBackend: isBackend,
+    isFrontend: isFrontend,
+    hits: hits,
+  };
+}
+
+/**
+ * Scans all discovered files and returns per-file results.
+ */
+function scanAll(targetPath) {
+  var files = discoverFiles(targetPath);
+  return files.map(function (f) {
+    return scanFile(f.filePath, targetPath);
+  });
+}
+
 module.exports = {
   walkDir: walkDir,
   discoverFiles: discoverFiles,
+  scanFile: scanFile,
+  scanAll: scanAll,
   isBackendFile: isBackendFile,
   isFrontendFile: isFrontendFile,
   SCAN_EXTENSIONS: SCAN_EXTENSIONS,

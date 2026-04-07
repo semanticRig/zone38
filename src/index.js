@@ -6,6 +6,8 @@ var scanner = require('./scanner');
 
 module.exports = {
   discoverFiles: scanner.discoverFiles,
+  scanFile: scanner.scanFile,
+  scanAll: scanner.scanAll,
   isBackendFile: scanner.isBackendFile,
   isFrontendFile: scanner.isFrontendFile,
 };

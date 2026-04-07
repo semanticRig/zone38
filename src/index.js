@@ -4,6 +4,7 @@
 
 var scanner = require('./scanner');
 var entropy = require('./entropy');
+var compression = require('./compression');
 
 module.exports = {
   discoverFiles: scanner.discoverFiles,
@@ -13,4 +14,7 @@ module.exports = {
   isFrontendFile: scanner.isFrontendFile,
   shannonEntropy: entropy.shannonEntropy,
   analyzeFileEntropy: entropy.analyzeFileEntropy,
+  analyzeCompression: compression.analyzeCompression,
+  ncd: compression.ncd,
+  selfCompressionRatio: compression.selfCompressionRatio,
 };

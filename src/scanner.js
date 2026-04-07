@@ -4,6 +4,10 @@ var fs = require('fs');
 var path = require('path');
 var rules = require('./rules');
 var entropy = require('./entropy');
+var compression = require('./compression');
+
+// Default corpus directory (relative to this file)
+var DEFAULT_CORPUS_DIR = path.join(__dirname, '..', 'corpus');
 
 // Directories to always skip during file discovery
 var SKIP_DIRS = [
@@ -198,6 +202,9 @@ function scanFile(filePath, basePath) {
   // Run entropy analysis on file content
   var entropyFindings = entropy.analyzeFileEntropy(content);
 
+  // Run compression analysis
+  var compressionResult = compression.analyzeCompression(content, DEFAULT_CORPUS_DIR);
+
   return {
     filePath: filePath,
     relativePath: relativePath || path.basename(filePath),
@@ -205,6 +212,7 @@ function scanFile(filePath, basePath) {
     isFrontend: isFrontend,
     hits: hits,
     entropyFindings: entropyFindings,
+    compression: compressionResult,
   };
 }
 

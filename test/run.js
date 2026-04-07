@@ -196,6 +196,59 @@ var secretsScan = scanner.scanFile(path.join(fixturesDir, 'secrets.js'), fixture
 assert(Array.isArray(secretsScan.entropyFindings), 'scanFile result includes entropyFindings');
 assert(secretsScan.entropyFindings.length >= 2, 'scanFile finds entropy issues in secrets.js');
 
+// --- Compression module ---
+section('Compression module');
+
+var compressionMod = require('../src/compression');
+
+// Self-compression ratio should be between 0 and 1 for real code
+var humanContent = fs.readFileSync(path.join(fixturesDir, 'clean.js'), 'utf8');
+var humanRatio = compressionMod.selfCompressionRatio(humanContent);
+assert(humanRatio > 0 && humanRatio < 1, 'self-compression ratio is between 0 and 1 (got ' + humanRatio.toFixed(3) + ')');
+
+// Highly repetitive code should compress more (lower ratio) than irregular code
+var repetitive = '';
+for (var rep = 0; rep < 50; rep++) {
+  repetitive += 'function handler' + rep + '(req, res) {\n';
+  repetitive += '  try {\n';
+  repetitive += '    const result = await service.process(req.body);\n';
+  repetitive += '    res.json({ success: true, data: result });\n';
+  repetitive += '  } catch (error) {\n';
+  repetitive += '    res.status(500).json({ success: false, error: error.message });\n';
+  repetitive += '  }\n';
+  repetitive += '}\n\n';
+}
+var repetitiveRatio = compressionMod.selfCompressionRatio(repetitive);
+assert(repetitiveRatio < humanRatio, 'repetitive code compresses more than varied code (' + repetitiveRatio.toFixed(3) + ' < ' + humanRatio.toFixed(3) + ')');
+
+// NCD: a string should have low NCD with itself
+var selfNcd = compressionMod.ncd(humanContent, humanContent);
+assert(selfNcd < 0.3, 'NCD of content with itself is low (got ' + selfNcd.toFixed(3) + ')');
+
+// NCD: different content should have higher NCD
+var sloppyContent = fs.readFileSync(path.join(fixturesDir, 'sloppy.js'), 'utf8');
+var diffNcd = compressionMod.ncd(humanContent, sloppyContent);
+assert(diffNcd > selfNcd, 'NCD of different files is higher than self-NCD');
+
+// --- Compression analysis with corpora ---
+section('Compression analysis');
+
+var corpusDir = path.join(__dirname, '..', 'corpus');
+var analysisResult = compressionMod.analyzeCompression(humanContent, corpusDir);
+assert(typeof analysisResult.selfRatio === 'number', 'analysis has selfRatio');
+assert(typeof analysisResult.compressionScore === 'number', 'analysis has compressionScore');
+assert(analysisResult.compressionScore >= 0 && analysisResult.compressionScore <= 100, 'compressionScore is 0-100 (got ' + analysisResult.compressionScore + ')');
+assert(analysisResult.ncdHuman !== null, 'analysis has ncdHuman (corpus loaded)');
+assert(analysisResult.ncdAI !== null, 'analysis has ncdAI (corpus loaded)');
+
+// --- Compression integration in scanner ---
+section('Compression integration');
+
+var cleanScan = scanner.scanFile(path.join(fixturesDir, 'clean.js'), fixturesDir);
+assert(cleanScan.compression !== undefined, 'scanFile result includes compression');
+assert(typeof cleanScan.compression.selfRatio === 'number', 'compression result has selfRatio');
+assert(typeof cleanScan.compression.compressionScore === 'number', 'compression result has compressionScore');
+
 // --- Summary ---
 process.stdout.write('\n' + passed + ' passed, ' + failed + ' failed\n');
 process.exit(failed > 0 ? 1 : 0);

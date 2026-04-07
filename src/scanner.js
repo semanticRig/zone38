@@ -3,6 +3,7 @@
 var fs = require('fs');
 var path = require('path');
 var rules = require('./rules');
+var entropy = require('./entropy');
 
 // Directories to always skip during file discovery
 var SKIP_DIRS = [
@@ -194,12 +195,16 @@ function scanFile(filePath, basePath) {
     }
   }
 
+  // Run entropy analysis on file content
+  var entropyFindings = entropy.analyzeFileEntropy(content);
+
   return {
     filePath: filePath,
     relativePath: relativePath || path.basename(filePath),
     isBackend: isBackend,
     isFrontend: isFrontend,
     hits: hits,
+    entropyFindings: entropyFindings,
   };
 }
 

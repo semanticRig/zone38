@@ -138,6 +138,64 @@ assert(typeof sampleHit.line === 'string', 'hit has line');
 assert(typeof sampleHit.lineNumber === 'number', 'hit has lineNumber');
 assert(typeof sampleHit.fix === 'string', 'hit has fix');
 
+// --- Entropy module ---
+section('Entropy module');
+
+var entropyMod = require('../src/entropy');
+
+// Shannon entropy of a uniform string should be 0
+assert(entropyMod.shannonEntropy('aaaaaaaaaa') === 0, 'entropy of uniform string is 0');
+
+// Shannon entropy of diverse string should be high
+var diverseEntropy = entropyMod.shannonEntropy('abcdefghijklmnop');
+assert(diverseEntropy > 3.5, 'entropy of diverse string > 3.5 (got ' + diverseEntropy.toFixed(2) + ')');
+
+// Charset detection
+assert(entropyMod.detectCharset('a3f8b2c1d4e5') === 'hex', 'detects hex charset');
+assert(entropyMod.detectCharset('ABCDabcd1234+/==') === 'base64', 'detects base64 charset');
+
+// String extraction
+var extracted = entropyMod.extractStrings("var x = 'short'; var y = 'thisIsALongerStringValue123';");
+assert(extracted.length === 1, 'extracts only strings >= 16 chars (got ' + extracted.length + ')');
+
+// Safe string detection
+assert(entropyMod.isSafeString('https://example.com/api/v1') === true, 'URL is safe');
+assert(entropyMod.isSafeString('550e8400-e29b-41d4-a716-446655440000') === true, 'UUID is safe');
+assert(entropyMod.isSafeString('Hello and welcome to the app') === true, 'English prose is safe');
+
+// --- Entropy: secrets fixture ---
+section('Entropy — secrets.js');
+
+var fs = require('fs');
+var secretsContent = fs.readFileSync(path.join(fixturesDir, 'secrets.js'), 'utf8');
+var secretFindings = entropyMod.analyzeFileEntropy(secretsContent);
+
+assert(secretFindings.length >= 2, 'secrets.js has at least 2 entropy findings (got ' + secretFindings.length + ')');
+
+// Each finding should have the expected shape
+if (secretFindings.length > 0) {
+  var sf = secretFindings[0];
+  assert(typeof sf.entropy === 'number', 'entropy finding has entropy value');
+  assert(typeof sf.charset === 'string', 'entropy finding has charset');
+  assert(typeof sf.lineNumber === 'number', 'entropy finding has lineNumber');
+  assert(sf.entropy >= 3.0, 'secret entropy is above threshold (got ' + sf.entropy + ')');
+}
+
+// --- Entropy: safe strings fixture ---
+section('Entropy — safe-strings.js');
+
+var safeContent = fs.readFileSync(path.join(fixturesDir, 'safe-strings.js'), 'utf8');
+var safeFindings = entropyMod.analyzeFileEntropy(safeContent);
+
+assert(safeFindings.length === 0, 'safe-strings.js has zero entropy findings (got ' + safeFindings.length + ')');
+
+// --- Entropy integration in scanner ---
+section('Entropy integration');
+
+var secretsScan = scanner.scanFile(path.join(fixturesDir, 'secrets.js'), fixturesDir);
+assert(Array.isArray(secretsScan.entropyFindings), 'scanFile result includes entropyFindings');
+assert(secretsScan.entropyFindings.length >= 2, 'scanFile finds entropy issues in secrets.js');
+
 // --- Summary ---
 process.stdout.write('\n' + passed + ' passed, ' + failed + ' failed\n');
 process.exit(failed > 0 ? 1 : 0);

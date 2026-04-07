@@ -5,6 +5,7 @@ var path = require('path');
 var rules = require('./rules');
 var entropy = require('./entropy');
 var compression = require('./compression');
+var scorer = require('./scorer');
 
 // Default corpus directory (relative to this file)
 var DEFAULT_CORPUS_DIR = path.join(__dirname, '..', 'corpus');
@@ -221,9 +222,14 @@ function scanFile(filePath, basePath) {
  */
 function scanAll(targetPath) {
   var files = discoverFiles(targetPath);
-  return files.map(function (f) {
+  var fileResults = files.map(function (f) {
     return scanFile(f.filePath, targetPath);
   });
+  var projectScore = scorer.scoreProject(fileResults);
+  return {
+    files: fileResults,
+    project: projectScore,
+  };
 }
 
 module.exports = {

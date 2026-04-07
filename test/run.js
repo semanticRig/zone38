@@ -249,6 +249,59 @@ assert(cleanScan.compression !== undefined, 'scanFile result includes compressio
 assert(typeof cleanScan.compression.selfRatio === 'number', 'compression result has selfRatio');
 assert(typeof cleanScan.compression.compressionScore === 'number', 'compression result has compressionScore');
 
+// --- Scoring module ---
+section('Scoring module');
+
+var scorerMod = require('../src/scorer');
+
+// Verdict mapping
+var v0 = scorerMod.getVerdict(0);
+assert(v0.label === 'Clean', 'score 0 = Clean');
+var v15 = scorerMod.getVerdict(15);
+assert(v15.label === 'Some slop', 'score 15 = Some slop');
+var v60 = scorerMod.getVerdict(60);
+assert(v60.label === 'Heavy slop', 'score 60 = Heavy slop');
+var v90 = scorerMod.getVerdict(90);
+assert(v90.label === 'Catastrophic', 'score 90 = Catastrophic');
+
+// Pattern score
+assert(scorerMod.patternScore([]) === 0, 'patternScore of empty hits is 0');
+var fakeHits = [{ severity: 5 }, { severity: 7 }, { severity: 3 }];
+var pScore = scorerMod.patternScore(fakeHits);
+assert(pScore > 0 && pScore <= 100, 'patternScore of hits is > 0 (got ' + pScore + ')');
+
+// Entropy score
+assert(scorerMod.entropyScore([]) === 0, 'entropyScore of no findings is 0');
+assert(scorerMod.entropyScore([{ entropy: 5 }]) > 0, 'entropyScore of 1 finding is > 0');
+
+// File scoring
+var sloppyScan = scanner.scanFile(path.join(fixturesDir, 'sloppy.js'), fixturesDir);
+var sloppyScored = scorerMod.scoreFile(sloppyScan);
+assert(sloppyScored.score > 0, 'sloppy.js score > 0 (got ' + sloppyScored.score + ')');
+assert(typeof sloppyScored.verdict.label === 'string', 'scored file has verdict label');
+assert(typeof sloppyScored.breakdown.patterns === 'number', 'scored file has pattern breakdown');
+assert(typeof sloppyScored.breakdown.compression === 'number', 'scored file has compression breakdown');
+
+var cleanScored = scorerMod.scoreFile(cleanScan);
+assert(cleanScored.score < sloppyScored.score, 'clean.js scores lower than sloppy.js (' + cleanScored.score + ' < ' + sloppyScored.score + ')');
+
+// --- Project scoring (scanAll integration) ---
+section('Project scoring');
+
+var scanResult = scanner.scanAll(fixturesDir);
+assert(scanResult.files !== undefined, 'scanAll returns files array');
+assert(scanResult.project !== undefined, 'scanAll returns project score');
+assert(typeof scanResult.project.score === 'number', 'project has score');
+assert(scanResult.project.score >= 0 && scanResult.project.score <= 100, 'project score is 0-100 (got ' + scanResult.project.score + ')');
+assert(typeof scanResult.project.verdict.label === 'string', 'project has verdict label');
+assert(scanResult.project.fileCount > 0, 'project fileCount > 0');
+assert(typeof scanResult.project.totalHits === 'number', 'project has totalHits');
+assert(scanResult.project.fileScores.length === scanResult.project.fileCount, 'fileScores count matches fileCount');
+
+// Self-scan: slopguard on itself should score low
+var selfScan = scanner.scanAll(path.join(__dirname, '..'));
+assert(selfScan.project.score < 25, 'slopguard self-scan score < 25 (got ' + selfScan.project.score + ')');
+
 // --- Summary ---
 process.stdout.write('\n' + passed + ' passed, ' + failed + ' failed\n');
 process.exit(failed > 0 ? 1 : 0);

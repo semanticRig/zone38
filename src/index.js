@@ -5,6 +5,7 @@
 var scanner = require('./scanner');
 var entropy = require('./entropy');
 var compression = require('./compression');
+var scorer = require('./scorer');
 
 module.exports = {
   discoverFiles: scanner.discoverFiles,
@@ -17,4 +18,7 @@ module.exports = {
   analyzeCompression: compression.analyzeCompression,
   ncd: compression.ncd,
   selfCompressionRatio: compression.selfCompressionRatio,
+  scoreFile: scorer.scoreFile,
+  scoreProject: scorer.scoreProject,
+  getVerdict: scorer.getVerdict,
 };

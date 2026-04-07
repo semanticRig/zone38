@@ -13,8 +13,8 @@ var filepath = './src/components/UserProfile.tsx';
 
 // Context-aware: OAuth client ID with || fallback — should NOT fire
 // (public keyword in LHS + fallback pattern raises threshold above H for hex)
-window.DRAWIO_GITLAB_ID = window.DRAWIO_GITLAB_ID || '2b14debc5feeb18ba65358d863ec870e4cc9294b28c3c941cb3014eb4af9a9b4';
-window.DRAWIO_DROPBOX_ID = window.DRAWIO_DROPBOX_ID || 'jg02tc0onwmhlgm';
+window.EXAMPLE_GITLAB_ID = window.EXAMPLE_GITLAB_ID || 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2';
+window.EXAMPLE_DROPBOX_ID = window.EXAMPLE_DROPBOX_ID || 'xm4pt7khbr2qnlw';
 window.APP_CLIENT_ID = window.APP_CLIENT_ID || 'Iv1.98d62f0431e40543';
 
 module.exports = {

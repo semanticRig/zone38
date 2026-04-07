@@ -186,7 +186,7 @@ if (secretFindings.length > 0) {
 section('Entropy — context-aware discriminant');
 
 // Decision table case 1: OAuth ID with || fallback and _ID LHS — must NOT fire
-var oauthLine = "window.DRAWIO_GITLAB_ID = window.DRAWIO_GITLAB_ID || '2b14debc5feeb18ba65358d863ec870e4cc9294b28c3c941cb3014eb4af9a9b4';";
+var oauthLine = "window.EXAMPLE_GITLAB_ID = window.EXAMPLE_GITLAB_ID || 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2';";
 var oauthFindings = entropyMod.analyzeLineEntropy(oauthLine, 1);
 assert(oauthFindings.length === 0, 'OAuth hex ID with || fallback does not fire (false positive eliminated)');
 

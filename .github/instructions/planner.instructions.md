@@ -142,11 +142,22 @@ Use the following template to plan each phase:
 
 ## Post-v1 Phases (Backlog, not started until v1 ships)
 
-### Phase 11: VS Code Extension
-### Phase 12: YAML Template Engine (Nuclei-style rule definitions)
-### Phase 13: --fix Flag (Auto-apply simple fixes)
-### Phase 14: --watch Flag (Re-scan on file changes)
-### Phase 15: Web Dashboard (Team analytics, paid tier)
+### Phase 11: Entropy False Positive Reduction
+- **Objective**: Replace the flat entropy threshold with a context-aware discriminant that eliminates false positives on config defaults and OAuth IDs while never silencing truly random secrets. Also surface the flagged line in verbose entropy output.
+- **Steps**:
+  1. Add known-prefix bypass table to `src/entropy.js` — strings starting with `sk-`, `ghp_`, `gho_`, `github_pat_`, `AKIA`, `ASIA`, `sk_live_`, `pk_live_`, `xox`, `xoxa-`, `xapp-`, `glpat-` fire at severity 10 unconditionally, skipping all threshold logic
+  2. Add LHS polarity scoring — extract the variable name left of `=` on the same line; multiply threshold by 0.8 if it contains a secret keyword (`secret`, `key`, `token`, `password`, `auth`, `credential`), by 1.3 if it contains a public keyword (`id`, `client`, `app`, `public`, `url`, `base`, `endpoint`, `callback`)
+  3. Add fallback pattern detection — if the line matches `identifier = identifier || 'string'`, multiply threshold by 1.5; then apply hard ceiling: `adjusted = min(adjusted, charset_max_entropy × 0.90)` so a truly random string always fires regardless of context multipliers
+  4. Add `line` field to every finding object returned by `analyzeLineEntropy()` so callers have the source line without re-reading the file
+  5. Update verbose CLI output in `bin/slopguard.js` to render entropy findings with the flagged line between the header and fix suggestion, matching the three-line format used by pattern hits
+- **Branch Name**: `fix/entropy-context-aware`
+- **Validation**: `node test/run.js` passes all 133+ tests. `window.X = window.X || 'hex-oauth-id'` does not fire. `sk-proj-...` with `_ID` LHS and `||` still fires at sev 10 (prefix bypass). 32-char random base64 with `_ID` + `||` still fires (hard ceiling). Verbose output shows the flagged line for entropy findings.
+
+### Phase 12: VS Code Extension
+### Phase 13: YAML Template Engine (Nuclei-style rule definitions)
+### Phase 14: --fix Flag (Auto-apply simple fixes)
+### Phase 15: --watch Flag (Re-scan on file changes)
+### Phase 16: Web Dashboard (Team analytics, paid tier)
 
 ---
 

@@ -178,8 +178,56 @@ if (secretFindings.length > 0) {
   assert(typeof sf.entropy === 'number', 'entropy finding has entropy value');
   assert(typeof sf.charset === 'string', 'entropy finding has charset');
   assert(typeof sf.lineNumber === 'number', 'entropy finding has lineNumber');
+  assert(typeof sf.line === 'string', 'entropy finding has line field');
   assert(sf.entropy >= 3.0, 'secret entropy is above threshold (got ' + sf.entropy + ')');
 }
+
+// --- Entropy: context-aware discriminant ---
+section('Entropy — context-aware discriminant');
+
+// Decision table case 1: OAuth ID with || fallback and _ID LHS — must NOT fire
+var oauthLine = "window.DRAWIO_GITLAB_ID = window.DRAWIO_GITLAB_ID || '2b14debc5feeb18ba65358d863ec870e4cc9294b28c3c941cb3014eb4af9a9b4';";
+var oauthFindings = entropyMod.analyzeLineEntropy(oauthLine, 1);
+assert(oauthFindings.length === 0, 'OAuth hex ID with || fallback does not fire (false positive eliminated)');
+
+// Decision table case 2: sk- prefix with _ID LHS and || fallback — MUST fire (prefix bypass)
+var skLine = "window.SOME_ID = window.SOME_ID || 'sk-proj-abc123def456ghi789jkl012mno345pqr678stu901';";
+var skFindings = entropyMod.analyzeLineEntropy(skLine, 1);
+assert(skFindings.length > 0, 'sk- prefixed key fires despite _ID LHS and || fallback');
+assert(skFindings[0].prefixMatch === true, 'sk- key flagged via prefix bypass');
+
+// Decision table case 3: random base64 with public LHS + || fallback — MUST still fire (hard ceiling)
+var randLine = "window.SOME_CALLBACK_ID = window.SOME_CALLBACK_ID || 'XqB3mNpK9rT2vY7wZ1sA4dF6hJ8lQeUiOcGbMnRk';";
+var randFindings = entropyMod.analyzeLineEntropy(randLine, 1);
+assert(randFindings.length > 0, 'random base64 still fires despite public LHS + || (hard ceiling enforced)');
+
+// Decision table case 4: purely random key, no context — fires normally
+var plainLine = "var apiSecret = 'XqB3mNpK9rT2vY7wZ1sA4dF6hJ8lQeUiOcGbMnRk';";
+var plainFindings = entropyMod.analyzeLineEntropy(plainLine, 1);
+assert(plainFindings.length > 0, 'random key with secret LHS fires normally');
+
+// Decision table case 5: known prefix table coverage
+var prefixes = ['sk-abc123def456ghi789', 'ghp_abc123def456ghi789jkl', 'AKIAIOSFODNN7EXAMPLE', 'glpat-abcdefghijklmnop'];
+for (var pIdx = 0; pIdx < prefixes.length; pIdx++) {
+  var pLine = "var x = '" + prefixes[pIdx] + "';";
+  var pFindings = entropyMod.analyzeLineEntropy(pLine, 1);
+  assert(pFindings.length > 0 && pFindings[0].prefixMatch === true, 'prefix bypass fires for: ' + prefixes[pIdx].split('-')[0] + '...');
+}
+
+// For hex, CHARSET_CEILING is null (no ceiling) — context is fully authoritative.
+// The adjusted threshold CAN exceed charset_max, which is intentional:
+// it means "never flag this hex string in this context" (e.g. OAuth IDs).
+var adjustedHex = entropyMod.adjustedThreshold('hex', "window.X_ID = window.X_ID || 'value';");
+assert(adjustedHex > entropyMod.CHARSET_MAX.hex, 'adjusted hex threshold exceeds charset max (no ceiling — context is authoritative, got ' + adjustedHex.toFixed(3) + ')');
+
+// For base64, ceiling is enforced: truly random keys (H~5.0+) always fire
+var base64Ceiling = entropyMod.CHARSET_CEILING.base64;
+var adjustedBase64 = entropyMod.adjustedThreshold('base64', "window.X_ID = window.X_ID || 'value';");
+assert(adjustedBase64 <= base64Ceiling, 'adjusted base64 threshold is capped at ceiling (got ' + adjustedBase64.toFixed(3) + ')');
+
+// LHS extraction works
+assert(entropyMod.extractLHS("var apiSecret = 'x';") === 'apisecret', 'extracts LHS from var declaration');
+assert(entropyMod.extractLHS("window.GITHUB_ID = value;") === 'window.github_id', 'extracts LHS from window assignment');
 
 // --- Entropy: safe strings fixture ---
 section('Entropy — safe-strings.js');

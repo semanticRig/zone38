@@ -207,7 +207,11 @@ for (var j = 0; j < sortedScores.length; j++) {
       // Show entropy findings
       for (var e = 0; e < fileResult.entropyFindings.length; e++) {
         var ef = fileResult.entropyFindings[e];
-        w.write('        ' + RED + BOLD + 'L' + ef.lineNumber + RESET + ' ' + DIM + '[entropy]' + RESET + ' High-entropy ' + ef.charset + ' string (H=' + ef.entropy + ')\n');
+        var prefixNote = ef.prefixMatch ? ' [known prefix]' : ' (H=' + ef.entropy + ')';
+        w.write('        ' + RED + BOLD + 'L' + ef.lineNumber + RESET + ' ' + DIM + '[entropy]' + RESET + ' High-entropy ' + ef.charset + ' string' + prefixNote + '\n');
+        if (ef.line) {
+          w.write('        ' + DIM + ef.line.trim().substring(0, 80) + RESET + '\n');
+        }
         w.write('        ' + GREEN + '\u21B3 Move secrets to environment variables.' + RESET + '\n');
       }
 

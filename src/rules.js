@@ -2,7 +2,7 @@
 
 // Pattern detection rules for slopguard
 // Each rule: { id, name, category, severity, description, test(line, ctx), fix }
-// test() is a pure function: returns true if the line is sloppy
+// The test method is pure — no side effects, returns boolean
 
 var rules = [
 
@@ -358,7 +358,7 @@ var rules = [
       return /===?\s*true\b/.test(line) || /===?\s*false\b/.test(line) ||
              /\btrue\s*===?/.test(line) || /\bfalse\s*===?/.test(line);
     },
-    fix: 'Use the boolean directly: `if (value)` instead of `if (value === true)`.',
+    fix: 'Use the boolean directly: `if (value)` instead of comparing to a boolean literal.',
   },
 ];
 

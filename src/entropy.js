@@ -68,15 +68,6 @@ function hasSecretPrefix(value) {
   return false;
 }
 
-/**
- * Extracts the variable name on the left-hand side of an assignment on this line.
- * Returns the LHS token (lowercased) or empty string if no assignment found.
- */
-function extractLHS(line) {
-  var match = line.match(/(?:^|[\s;])(?:var|let|const)?\s*([A-Za-z_$][A-Za-z0-9_$.]*)\s*=/);
-  if (!match) return '';
-  return match[1].toLowerCase();
-}
 
 // Minimum string length to consider for entropy analysis
 var MIN_STRING_LENGTH = 16;
@@ -90,13 +81,6 @@ var STRUCTURAL_EXCLUSIONS = [
   /^(\.\/|\.\.\/|\/)./,                                                  // file paths
 ];
 
-// LHS keywords that indicate the assigned variable is public config
-var PUBLIC_LHS_KEYWORDS = ['id', 'client', 'app', 'public', 'url', 'base', 'endpoint', 'callback'];
-
-/**
- * Extracts string literals from a line of code.
- * Returns array of { value, quote } for strings longer than MIN_STRING_LENGTH.
- */
 function extractStrings(line) {
   var results = [];
   var regex = /(['"`])([^'"`\\]*(?:\\.[^'"`\\]*)*)\1/g;
@@ -146,7 +130,14 @@ function analyzeLineEntropy(line, lineNumber) {
     var charset = detectCharset(str.value);
 
     // Known-prefix bypass: always flag, skip pipeline
+    // But skip prose that coincidentally starts with a prefix (secrets have no spaces)
     if (hasSecretPrefix(str.value)) {
+      var prefixSpaces = 0;
+      for (var ps = 0; ps < str.value.length; ps++) {
+        if (str.value[ps] === ' ') prefixSpaces++;
+      }
+      if (str.value.length > 0 && prefixSpaces / str.value.length > 0.10) continue;
+
       findings.push({
         value: str.value,
         entropy: Math.round(entropy * 100) / 100,
@@ -159,16 +150,6 @@ function analyzeLineEntropy(line, lineNumber) {
       continue;
     }
 
-    // Structural exclusion: URLs, UUIDs, data URIs, file paths cannot be secrets
-    var excluded = false;
-    for (var e = 0; e < STRUCTURAL_EXCLUSIONS.length; e++) {
-      if (STRUCTURAL_EXCLUSIONS[e].test(str.value)) {
-        excluded = true;
-        break;
-      }
-    }
-    if (excluded) continue;
-
     // Stage 1: Decompose compound strings
     var decomposed = decomposer.decompose(str.value);
     var flaggedValues = [];
@@ -176,6 +157,25 @@ function analyzeLineEntropy(line, lineNumber) {
     for (var v = 0; v < decomposed.values.length; v++) {
       var val = decomposed.values[v];
       if (val.length < 8) continue; // Too short for meaningful signal analysis
+
+      // Structural exclusion: applied per-value AFTER decomposition
+      // so URLs with secret query params get decomposed first
+      var excluded = false;
+      for (var e = 0; e < STRUCTURAL_EXCLUSIONS.length; e++) {
+        if (STRUCTURAL_EXCLUSIONS[e].test(val)) {
+          excluded = true;
+          break;
+        }
+      }
+      if (excluded) continue;
+
+      // Prose filter: secrets don't contain spaces; strings with >10% whitespace
+      // are human-readable text (fix descriptions, UI messages, etc.)
+      var spaceCount = 0;
+      for (var sc = 0; sc < val.length; sc++) {
+        if (val[sc] === ' ') spaceCount++;
+      }
+      if (val.length > 0 && spaceCount / val.length > 0.10) continue;
 
       // Stages 2-5: Fast pipeline
       var result = pipelineAnalyze(val);
@@ -187,24 +187,7 @@ function analyzeLineEntropy(line, lineNumber) {
         // Escalate to vector engine (Stage 6)
         var vScore = vectorEngine.vectorScore(val);
 
-        // Context suppression for borderline findings:
-        // If vector score is not overwhelming AND line assigns to a public LHS
-        // with a fallback pattern, suppress — these are config defaults, not secrets.
-        if (vScore >= 0.5 && vScore < 0.7) {
-          var lhs = extractLHS(line);
-          if (lhs && /\|\|/.test(line)) {
-            var hasPublicLHS = false;
-            for (var pk = 0; pk < PUBLIC_LHS_KEYWORDS.length; pk++) {
-              if (lhs.indexOf(PUBLIC_LHS_KEYWORDS[pk]) !== -1) {
-                hasPublicLHS = true;
-                break;
-              }
-            }
-            if (hasPublicLHS) continue;
-          }
-        }
-
-        if (vScore >= 0.5) {
+        if (vScore >= 0.52) {
           flaggedValues.push(val);
         }
       }
@@ -251,7 +234,6 @@ module.exports = {
   analyzeLineEntropy: analyzeLineEntropy,
   analyzeFileEntropy: analyzeFileEntropy,
   hasSecretPrefix: hasSecretPrefix,
-  extractLHS: extractLHS,
   pipelineAnalyze: pipelineAnalyze,
   SECRET_PREFIXES: SECRET_PREFIXES,
   MIN_STRING_LENGTH: MIN_STRING_LENGTH,

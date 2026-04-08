@@ -12,7 +12,7 @@
 function aggregate(charSignal, bigramSig, compressionSig) {
   // Collect available signals
   var signals = [charSignal, bigramSig];
-  if (compressionSig !== null && compressionSig !== undefined) {
+  if (compressionSig != null) {
     signals.push(compressionSig);
   }
 

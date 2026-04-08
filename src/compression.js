@@ -154,7 +154,7 @@ function clearCorpusCache() {
  * Higher signal = harder to compress = more random = more secret-like.
  */
 function compressionSignal(str) {
-  if (!str || str.length <= 80) return null;
+  if (!str || str.length <= 50) return null;
 
   var raw = Buffer.from(str, 'utf8');
   var compressed = zlib.gzipSync(raw, { level: 9 });
@@ -179,6 +179,13 @@ function compressionSignal(str) {
   } else {
     // ratio 1.0 - 1.5: compressed is bigger, very random
     signal = 0.9 + ((ratio - 1.0) / 0.5) * 0.1;
+  }
+
+  // Short strings (51-80 chars): gzip header (~18 bytes) inflates ratio,
+  // making all content look incompressible. Cap at 0.5 (neutral) —
+  // compression can confirm "structured" but cannot reliably claim "random."
+  if (str.length <= 80 && signal > 0.5) {
+    signal = 0.5;
   }
 
   return Math.max(0, Math.min(1, signal));

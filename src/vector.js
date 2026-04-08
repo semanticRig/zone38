@@ -97,7 +97,7 @@ function dimEntropy(str) {
  * Dimension 2: Compressibility (Kolmogorov approximation).
  */
 function dimCompressibility(str) {
-  if (str.length < 50) {
+  if (str.length < 80) {
     // Short-medium strings: gzip header dominates, use unique char ratio instead
     var unique = Object.keys(str.split('').reduce(function (acc, ch) {
       acc[ch] = true;

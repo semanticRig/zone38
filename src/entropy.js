@@ -187,7 +187,7 @@ function analyzeLineEntropy(line, lineNumber) {
         // Escalate to vector engine (Stage 6)
         var vScore = vectorEngine.vectorScore(val);
 
-        if (vScore >= 0.52) {
+        if (vScore >= 0.5) {
           flaggedValues.push(val);
         }
       }

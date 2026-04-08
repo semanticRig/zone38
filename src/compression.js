@@ -91,18 +91,18 @@ function analyzeCompression(content, corpusDir) {
     compressionScore: 0,
   };
 
-  // Self-ratio scoring: AI code typically has ratio < 0.35, human > 0.45
+  // Self-ratio scoring: AI code typically has ratio < 0.20, human > 0.35
+  // Normal JavaScript compresses to 0.25-0.40 with gzip.
   // Map ratio to a 0-100 contribution (lower ratio = higher score)
   var ratioScore = 0;
   if (selfRatio < 0.20) {
-    ratioScore = 100;
-  } else if (selfRatio < 0.30) {
-    ratioScore = 80;
-  } else if (selfRatio < 0.40) {
-    ratioScore = 50;
-  } else if (selfRatio < 0.50) {
-    ratioScore = 25;
+    // Extremely repetitive — strong AI signal
+    ratioScore = 50 + ((0.20 - selfRatio) / 0.20) * 50;
+  } else if (selfRatio < 0.35) {
+    // Mild AI signal — linear interpolation
+    ratioScore = ((0.35 - selfRatio) / 0.15) * 50;
   } else {
+    // Normal JavaScript compression profile — no AI signal
     ratioScore = 0;
   }
 

@@ -331,7 +331,7 @@ assert(scanResult.project.fileScores.length === scanResult.project.fileCount, 'f
 
 // Self-scan: slopguard on itself should score low
 var selfScan = scanner.scanAll(path.join(__dirname, '..'));
-assert(selfScan.project.score <= 25, 'slopguard self-scan score <= 25 (got ' + selfScan.project.score + ')');
+assert(selfScan.project.score < 25, 'slopguard self-scan score < 25 (got ' + selfScan.project.score + ')');
 
 // --- MCP config scanner ---
 section('MCP config scanner');

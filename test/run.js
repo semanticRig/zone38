@@ -576,6 +576,62 @@ var twoSigDec = aggregator.aggregate(0.1, 0.15, null);
 assert(twoSigDec.decided === true, 'two safe signals (null compression): decided=true');
 assert(twoSigDec.score < 10, 'two safe signals (null compression): low score');
 
-// --- Summary ---
-process.stdout.write('\n' + passed + ' passed, ' + failed + ' failed\n');
-process.exit(failed > 0 ? 1 : 0);
+// --- Vector engine ---
+section('Vector engine (6-dim)');
+
+var vector = require('../src/vector.js');
+
+// Real API key → score >= 0.5 (secret)
+var apiKeyScore = vector.vectorScore('sk_live_abc123def456ghi789jkl012mno345');
+assert(apiKeyScore >= 0.5, 'API key vectorScore >= 0.5 (got ' + apiKeyScore.toFixed(3) + ')');
+
+// Random secret → score >= 0.5
+var randomSecretScore = vector.vectorScore('Xk7mR9qL2wF5nT3vBj8Yp4sAc6dGh1');
+assert(randomSecretScore >= 0.5, 'random secret vectorScore >= 0.5 (got ' + randomSecretScore.toFixed(3) + ')');
+
+// English-like string → score < 0.5 (not secret)
+var englishScore = vector.vectorScore('this is a normal english sentence for testing purposes');
+assert(englishScore < 0.5, 'English text vectorScore < 0.5 (got ' + englishScore.toFixed(3) + ')');
+
+// Code-like string → score < 0.5
+var codeScore = vector.vectorScore('function getdata() { return this.data || defaultvalue; }');
+assert(codeScore < 0.5, 'code string vectorScore < 0.5 (got ' + codeScore.toFixed(3) + ')');
+
+// Dimension smoke tests
+assert(vector.dimEntropy('aaaa') === 0, 'dimEntropy of uniform string is 0');
+assert(vector.dimEntropy('abcd') > 0.5, 'dimEntropy of diverse short string > 0.5');
+assert(vector.dimAlternation('aaaa') === 0, 'dimAlternation of same-type chars is 0');
+assert(vector.dimAlternation('aA1!') === 1, 'dimAlternation of all-different types is 1');
+assert(vector.dimCompressibility('abc') >= 0, 'dimCompressibility handles short strings');
+
+// Empty string edge case
+assert(vector.vectorScore('') === 0, 'empty string vectorScore is 0');
+
+// --- Vector worker ---
+section('Vector worker (batch)');
+
+var vectorWorker = require('../src/vector-worker.js');
+
+// Synchronous fallback batch (always works regardless of Node version)
+var workerBatch = [
+  { index: 0, value: 'sk_live_abc123def456ghi789jkl012mno345' },
+  { index: 1, value: 'this is normal english text for testing purposes' },
+];
+
+vectorWorker.runBatch(workerBatch).then(function (results) {
+  assert(results.length === 2, 'worker batch returns 2 results');
+  assert(results[0].score >= 0.5, 'worker: API key score >= 0.5 (got ' + results[0].score.toFixed(3) + ')');
+  assert(results[1].score < 0.5, 'worker: English text score < 0.5 (got ' + results[1].score.toFixed(3) + ')');
+
+  // Empty batch
+  return vectorWorker.runBatch([]);
+}).then(function (emptyResults) {
+  assert(emptyResults.length === 0, 'worker: empty batch returns empty array');
+
+  // --- Summary ---
+  process.stdout.write('\n' + passed + ' passed, ' + failed + ' failed\n');
+  process.exit(failed > 0 ? 1 : 0);
+}).catch(function (err) {
+  process.stderr.write('Worker test error: ' + err.message + '\n');
+  process.exit(1);
+});

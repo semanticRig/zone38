@@ -505,6 +505,77 @@ assert(shortBigram === 0.5, 'short string returns neutral bigram signal 0.5');
 var zeroBigram = bigram.bigramSignal('aaaa', 0);
 assert(zeroBigram === 0.5, 'zero entropy string returns neutral bigram signal 0.5');
 
+// --- Compression signal (string-level) ---
+section('Compression signal (string-level)');
+
+var compression = require('../src/compression.js');
+
+// Short string: returns null
+var shortCompSig = compression.compressionSignal('short');
+assert(shortCompSig === null, 'string <= 20 chars returns null');
+
+var twentyChar = compression.compressionSignal('abcdefghijklmnopqrst');
+assert(twentyChar === null, 'exactly 20 chars returns null');
+
+// Long random string: high signal (resists compression)
+var randomStr = 'Xk7mR9qL2wF5nT3vBj8Yp4sAc6dGh1';
+var randomSig = compression.compressionSignal(randomStr);
+assert(randomSig !== null, 'long random string returns non-null signal');
+assert(randomSig > 0.5, 'random string has high compression signal (' + randomSig.toFixed(3) + ')');
+
+// Long repetitive string: low signal (compresses well)
+var repetitive = '';
+for (var ri = 0; ri < 10; ri++) repetitive += 'function getData() { return data; } ';
+var repSig = compression.compressionSignal(repetitive);
+assert(repSig !== null, 'long repetitive string returns non-null signal');
+assert(repSig < 0.5, 'repetitive string has low compression signal (' + repSig.toFixed(3) + ')');
+
+// Empty/null: returns null
+assert(compression.compressionSignal('') === null, 'empty string returns null');
+assert(compression.compressionSignal(null) === null, 'null returns null');
+
+// --- Aggregator ---
+section('Aggregator');
+
+var aggregator = require('../src/aggregator.js');
+
+// All signals agree safe (below 0.25)
+var safeDec = aggregator.aggregate(0.1, 0.2, 0.15);
+assert(safeDec.decided === true, 'all-safe signals: decided=true');
+assert(safeDec.ambiguous === false, 'all-safe signals: ambiguous=false');
+assert(safeDec.score < 10, 'all-safe signals: score < 10 (got ' + safeDec.score.toFixed(1) + ')');
+
+// All signals agree secret (above 0.75)
+var secretDec = aggregator.aggregate(0.85, 0.90, 0.80);
+assert(secretDec.decided === true, 'all-secret signals: decided=true');
+assert(secretDec.ambiguous === false, 'all-secret signals: ambiguous=false');
+assert(secretDec.score >= 80, 'all-secret signals: score >= 80 (got ' + secretDec.score.toFixed(1) + ')');
+
+// Signals disagree (spread > 0.35)
+var disagreeDec = aggregator.aggregate(0.2, 0.8, 0.5);
+assert(disagreeDec.decided === false, 'disagreeing signals: decided=false');
+assert(disagreeDec.ambiguous === true, 'disagreeing signals: ambiguous=true');
+
+// Twilight zone: all signals 0.4-0.6, none extreme
+var twilightDec = aggregator.aggregate(0.45, 0.55, 0.50);
+assert(twilightDec.decided === false, 'twilight signals: decided=false');
+assert(twilightDec.ambiguous === true, 'twilight signals: ambiguous=true');
+
+// Default: mild lean safe (avg < 0.40)
+var leanSafeDec = aggregator.aggregate(0.2, 0.3, 0.25);
+assert(leanSafeDec.decided === true, 'lean-safe signals: decided=true');
+assert(leanSafeDec.score < 40, 'lean-safe signals: score < 40 (got ' + leanSafeDec.score.toFixed(1) + ')');
+
+// Default: mild lean secret (avg > 0.60)
+var leanSecretDec = aggregator.aggregate(0.65, 0.70, 0.60);
+assert(leanSecretDec.decided === true, 'lean-secret signals: decided=true');
+assert(leanSecretDec.score > 60, 'lean-secret signals: score > 60 (got ' + leanSecretDec.score.toFixed(1) + ')');
+
+// Two signals only (compressionSignal null)
+var twoSigDec = aggregator.aggregate(0.1, 0.15, null);
+assert(twoSigDec.decided === true, 'two safe signals (null compression): decided=true');
+assert(twoSigDec.score < 10, 'two safe signals (null compression): low score');
+
 // --- Summary ---
 process.stdout.write('\n' + passed + ' passed, ' + failed + ' failed\n');
 process.exit(failed > 0 ? 1 : 0);

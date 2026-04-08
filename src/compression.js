@@ -147,6 +147,43 @@ function clearCorpusCache() {
   corpusCache = {};
 }
 
+/**
+ * Stage 4: String-level compression signal.
+ * Compresses a single string and maps the ratio to a 0-1 signal.
+ * Returns null for strings <= 20 chars (gzip header dominates, ratio meaningless).
+ * Higher signal = harder to compress = more random = more secret-like.
+ */
+function compressionSignal(str) {
+  if (!str || str.length <= 20) return null;
+
+  var raw = Buffer.from(str, 'utf8');
+  var compressed = zlib.gzipSync(raw, { level: 9 });
+  var ratio = compressed.length / raw.length;
+
+  // Cap ratio at 1.5 (gzip header can inflate short-medium strings)
+  if (ratio > 1.5) ratio = 1.5;
+
+  // Map ratio to signal:
+  // 0.3-0.5 (compresses well) → 0.1-0.3 (structured)
+  // 0.8-1.0+ (resists compression) → 0.7-0.9 (random)
+  // Linear interpolation across the full range
+  var signal;
+  if (ratio <= 0.3) {
+    signal = 0.1;
+  } else if (ratio <= 0.5) {
+    signal = 0.1 + ((ratio - 0.3) / 0.2) * 0.2;
+  } else if (ratio <= 0.8) {
+    signal = 0.3 + ((ratio - 0.5) / 0.3) * 0.4;
+  } else if (ratio <= 1.0) {
+    signal = 0.7 + ((ratio - 0.8) / 0.2) * 0.2;
+  } else {
+    // ratio 1.0 - 1.5: compressed is bigger, very random
+    signal = 0.9 + ((ratio - 1.0) / 0.5) * 0.1;
+  }
+
+  return Math.max(0, Math.min(1, signal));
+}
+
 module.exports = {
   compressedSize: compressedSize,
   selfCompressionRatio: selfCompressionRatio,
@@ -154,4 +191,5 @@ module.exports = {
   loadCorpus: loadCorpus,
   analyzeCompression: analyzeCompression,
   clearCorpusCache: clearCorpusCache,
+  compressionSignal: compressionSignal,
 };

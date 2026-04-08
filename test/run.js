@@ -402,6 +402,109 @@ assert(typeof mcpScanResult.project.totalMCPFindings === 'number', 'project scor
 var noMCPScanResult = scanner.scanAll(mcpFixtureDir);
 assert(noMCPScanResult.mcpFindings.length === 0, 'scanAll without mcp has no MCP findings');
 
+// --- Decomposer ---
+section('Decomposer');
+
+var decomposer = require('../src/decomposer.js');
+
+// Strategy 1: Semicolon-delimited key=value (mxGraph style)
+var mxResult = decomposer.decompose('sketch=0;rounded=1;arcSize=50;fillColor=#3aa7ff;strokeColor=#dddddd');
+assert(mxResult.decomposed === true, 'mxGraph style string is decomposed');
+assert(mxResult.values.indexOf('#3aa7ff') !== -1, 'mxGraph decomposed values contain #3aa7ff');
+assert(mxResult.values.indexOf('0') !== -1, 'mxGraph decomposed values contain 0');
+
+// Strategy 1: Compound string with embedded secret
+var compoundResult = decomposer.decompose('user=admin;password=Xk7mR9qL2;host=db.prod.internal');
+assert(compoundResult.decomposed === true, 'compound key=value string is decomposed');
+assert(compoundResult.values.indexOf('Xk7mR9qL2') !== -1, 'embedded password is extracted as value');
+assert(compoundResult.values.indexOf('admin') !== -1, 'admin is extracted as value');
+
+// Strategy 2: Comma-delimited key:value
+var commaResult = decomposer.decompose('name:Alice,role:admin,level:5');
+assert(commaResult.decomposed === true, 'comma-delimited key:value is decomposed');
+assert(commaResult.values.length === 3, 'comma strategy extracts 3 values');
+
+// Strategy 4: URL with query params
+var urlResult = decomposer.decompose('https://api.example.com/v1?user=bob&token=abc123&format=json');
+assert(urlResult.decomposed === true, 'URL with query params is decomposed');
+assert(urlResult.values.indexOf('abc123') !== -1, 'URL param value abc123 extracted');
+
+// Strategy 5: JSON fragment
+var jsonResult = decomposer.decompose('{"name": "Alice", "role": "admin"}');
+assert(jsonResult.decomposed === true, 'JSON fragment is decomposed');
+assert(jsonResult.values.indexOf('Alice') !== -1, 'JSON value Alice extracted');
+assert(jsonResult.values.indexOf('admin') !== -1, 'JSON value admin extracted');
+
+// No strategy: plain string passes through
+var plainResult = decomposer.decompose('sk_live_abc123def456ghi789jkl012mno345');
+assert(plainResult.decomposed === false, 'plain API key is NOT decomposed');
+assert(plainResult.values.length === 1, 'plain string has 1 value (itself)');
+assert(plainResult.values[0] === 'sk_live_abc123def456ghi789jkl012mno345', 'plain string value matches original');
+
+// Empty values dropped
+var emptyValResult = decomposer.decompose('a=;b=;c=;d=hello');
+assert(emptyValResult.decomposed === true, 'string with empty values is decomposed');
+assert(emptyValResult.values.indexOf('') === -1, 'empty values are dropped');
+
+// Edge: null/empty input
+var nullResult = decomposer.decompose('');
+assert(nullResult.decomposed === false, 'empty string returns decomposed: false');
+assert(nullResult.values.length === 0, 'empty string returns empty values');
+
+// --- Character Frequency ---
+section('Character frequency signal');
+
+var charFreq = require('../src/char-frequency.js');
+
+// API key: near-uniform distribution → high signal
+var apiKeySignal = charFreq.charFrequencySignal('sk_live_abc123def456ghi789jkl012mno345');
+assert(apiKeySignal.signal > 0.4, 'API key has high char frequency signal (' + apiKeySignal.signal.toFixed(3) + ')');
+assert(apiKeySignal.charEntropy > 3.0, 'API key has high Shannon entropy (' + apiKeySignal.charEntropy.toFixed(3) + ')');
+
+// Code-like string: mostly lowercase → low signal
+var codeSignal = charFreq.charFrequencySignal('this is a normal variable name for testing');
+assert(codeSignal.signal < 0.5, 'code-like string has low char frequency signal (' + codeSignal.signal.toFixed(3) + ')');
+
+// Color hex: mostly hex chars → should not be extreme
+var hexSignal = charFreq.charFrequencySignal('#3aa7ff');
+assert(typeof hexSignal.signal === 'number', 'hex color returns a numeric signal');
+
+// Empty/short edge cases
+var emptySignal = charFreq.charFrequencySignal('');
+assert(emptySignal.signal === 0.5, 'empty string returns neutral signal 0.5');
+assert(emptySignal.charEntropy === 0, 'empty string has 0 entropy');
+
+var singleSignal = charFreq.charFrequencySignal('a');
+assert(singleSignal.signal === 0.5, 'single char returns neutral signal 0.5');
+assert(singleSignal.charEntropy === 0, 'single char has 0 entropy');
+
+// Shannon entropy: known value
+var entropyVal = charFreq.shannonEntropy('aabb');
+assert(entropyVal === 1, 'Shannon entropy of aabb is 1.0');
+
+// --- Bigram Entropy ---
+section('Bigram entropy signal');
+
+var bigram = require('../src/bigram.js');
+
+// Random-looking secret: high bigram signal
+var secretCharResult = charFreq.charFrequencySignal('Xk7mR9qL2wF5nT3vBj8');
+var secretBigram = bigram.bigramSignal('Xk7mR9qL2wF5nT3vBj8', secretCharResult.charEntropy);
+assert(secretBigram > 0.5, 'random secret has high bigram signal (' + secretBigram.toFixed(3) + ')');
+
+// Structured string: lower bigram signal
+var structCharResult = charFreq.charFrequencySignal('aaabbbcccdddeeefffggg');
+var structBigram = bigram.bigramSignal('aaabbbcccdddeeefffggg', structCharResult.charEntropy);
+assert(structBigram < 0.5, 'structured string has low bigram signal (' + structBigram.toFixed(3) + ')');
+
+// Short string: neutral
+var shortBigram = bigram.bigramSignal('abc', 1.5);
+assert(shortBigram === 0.5, 'short string returns neutral bigram signal 0.5');
+
+// Zero entropy: neutral
+var zeroBigram = bigram.bigramSignal('aaaa', 0);
+assert(zeroBigram === 0.5, 'zero entropy string returns neutral bigram signal 0.5');
+
 // --- Summary ---
 process.stdout.write('\n' + passed + ' passed, ' + failed + ' failed\n');
 process.exit(failed > 0 ? 1 : 0);

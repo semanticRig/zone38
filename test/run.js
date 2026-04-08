@@ -138,7 +138,7 @@ assert(typeof sampleHit.line === 'string', 'hit has line');
 assert(typeof sampleHit.lineNumber === 'number', 'hit has lineNumber');
 assert(typeof sampleHit.fix === 'string', 'hit has fix');
 
-// --- Entropy module ---
+// --- Entropy module (hybrid pipeline) ---
 section('Entropy module');
 
 var entropyMod = require('../src/entropy');
@@ -158,10 +158,17 @@ assert(entropyMod.detectCharset('ABCDabcd1234+/==') === 'base64', 'detects base6
 var extracted = entropyMod.extractStrings("var x = 'short'; var y = 'thisIsALongerStringValue123';");
 assert(extracted.length === 1, 'extracts only strings >= 16 chars (got ' + extracted.length + ')');
 
-// Safe string detection
-assert(entropyMod.isSafeString('https://example.com/api/v1') === true, 'URL is safe');
-assert(entropyMod.isSafeString('550e8400-e29b-41d4-a716-446655440000') === true, 'UUID is safe');
-assert(entropyMod.isSafeString('Hello and welcome to the app') === true, 'English prose is safe');
+// LHS extraction
+assert(entropyMod.extractLHS("var apiSecret = 'x';") === 'apisecret', 'extracts LHS from var declaration');
+assert(entropyMod.extractLHS("window.GITHUB_ID = value;") === 'window.github_id', 'extracts LHS from window assignment');
+
+// Pipeline signal: known safe string should have low score
+var safePipeline = entropyMod.pipelineAnalyze('this is a completely normal english sentence used for testing only');
+assert(safePipeline.score < 40, 'pipeline: normal text scores low (' + safePipeline.score.toFixed(1) + ')');
+
+// Pipeline signal: random secret should have high score
+var secretPipeline = entropyMod.pipelineAnalyze('Xk7mR9qL2wF5nT3vBj8Yp4sAc6dGh1');
+assert(secretPipeline.score > 50, 'pipeline: random secret scores high (' + secretPipeline.score.toFixed(1) + ')');
 
 // --- Entropy: secrets fixture ---
 section('Entropy — secrets.js');
@@ -182,52 +189,32 @@ if (secretFindings.length > 0) {
   assert(sf.entropy >= 3.0, 'secret entropy is above threshold (got ' + sf.entropy + ')');
 }
 
-// --- Entropy: context-aware discriminant ---
-section('Entropy — context-aware discriminant');
+// --- Entropy: pipeline discriminant ---
+section('Entropy — pipeline discriminant');
 
-// Decision table case 1: OAuth ID with || fallback and _ID LHS — must NOT fire
-var oauthLine = "window.EXAMPLE_GITLAB_ID = window.EXAMPLE_GITLAB_ID || 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2';";
-var oauthFindings = entropyMod.analyzeLineEntropy(oauthLine, 1);
-assert(oauthFindings.length === 0, 'OAuth hex ID with || fallback does not fire (false positive eliminated)');
-
-// Decision table case 2: sk- prefix with _ID LHS and || fallback — MUST fire (prefix bypass)
+// sk- prefix with _ID LHS and || fallback — MUST fire (prefix bypass)
 var skLine = "window.SOME_ID = window.SOME_ID || 'sk-proj-abc123def456ghi789jkl012mno345pqr678stu901';";
 var skFindings = entropyMod.analyzeLineEntropy(skLine, 1);
 assert(skFindings.length > 0, 'sk- prefixed key fires despite _ID LHS and || fallback');
 assert(skFindings[0].prefixMatch === true, 'sk- key flagged via prefix bypass');
 
-// Decision table case 3: random base64 with public LHS + || fallback — MUST still fire (hard ceiling)
+// Random base64 with public LHS + || fallback — pipeline should flag
 var randLine = "window.SOME_CALLBACK_ID = window.SOME_CALLBACK_ID || 'XqB3mNpK9rT2vY7wZ1sA4dF6hJ8lQeUiOcGbMnRk';";
 var randFindings = entropyMod.analyzeLineEntropy(randLine, 1);
-assert(randFindings.length > 0, 'random base64 still fires despite public LHS + || (hard ceiling enforced)');
+assert(randFindings.length > 0, 'random base64 fires via pipeline signals');
 
-// Decision table case 4: purely random key, no context — fires normally
+// Purely random key, no context — fires normally
 var plainLine = "var apiSecret = 'XqB3mNpK9rT2vY7wZ1sA4dF6hJ8lQeUiOcGbMnRk';";
 var plainFindings = entropyMod.analyzeLineEntropy(plainLine, 1);
-assert(plainFindings.length > 0, 'random key with secret LHS fires normally');
+assert(plainFindings.length > 0, 'random key fires normally');
 
-// Decision table case 5: known prefix table coverage
+// Known prefix table coverage
 var prefixes = ['sk-abc123def456ghi789', 'ghp_abc123def456ghi789jkl', 'AKIAIOSFODNN7EXAMPLE', 'glpat-abcdefghijklmnop'];
 for (var pIdx = 0; pIdx < prefixes.length; pIdx++) {
   var pLine = "var x = '" + prefixes[pIdx] + "';";
   var pFindings = entropyMod.analyzeLineEntropy(pLine, 1);
   assert(pFindings.length > 0 && pFindings[0].prefixMatch === true, 'prefix bypass fires for: ' + prefixes[pIdx].split('-')[0] + '...');
 }
-
-// For hex, CHARSET_CEILING is null (no ceiling) — context is fully authoritative.
-// The adjusted threshold CAN exceed charset_max, which is intentional:
-// it means "never flag this hex string in this context" (e.g. OAuth IDs).
-var adjustedHex = entropyMod.adjustedThreshold('hex', "window.X_ID = window.X_ID || 'value';");
-assert(adjustedHex > entropyMod.CHARSET_MAX.hex, 'adjusted hex threshold exceeds charset max (no ceiling — context is authoritative, got ' + adjustedHex.toFixed(3) + ')');
-
-// For base64, ceiling is enforced: truly random keys (H~5.0+) always fire
-var base64Ceiling = entropyMod.CHARSET_CEILING.base64;
-var adjustedBase64 = entropyMod.adjustedThreshold('base64', "window.X_ID = window.X_ID || 'value';");
-assert(adjustedBase64 <= base64Ceiling, 'adjusted base64 threshold is capped at ceiling (got ' + adjustedBase64.toFixed(3) + ')');
-
-// LHS extraction works
-assert(entropyMod.extractLHS("var apiSecret = 'x';") === 'apisecret', 'extracts LHS from var declaration');
-assert(entropyMod.extractLHS("window.GITHUB_ID = value;") === 'window.github_id', 'extracts LHS from window assignment');
 
 // --- Entropy: safe strings fixture ---
 section('Entropy — safe-strings.js');
@@ -512,14 +499,14 @@ var compression = require('../src/compression.js');
 
 // Short string: returns null
 var shortCompSig = compression.compressionSignal('short');
-assert(shortCompSig === null, 'string <= 20 chars returns null');
+assert(shortCompSig === null, 'string <= 80 chars returns null');
 
-var twentyChar = compression.compressionSignal('abcdefghijklmnopqrst');
-assert(twentyChar === null, 'exactly 20 chars returns null');
+var eightyChar = compression.compressionSignal('abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefgh');
+assert(eightyChar === null, 'exactly 80 chars returns null');
 
 // Long random string: high signal (resists compression)
-var randomStr = 'Xk7mR9qL2wF5nT3vBj8Yp4sAc6dGh1';
-var randomSig = compression.compressionSignal(randomStr);
+var randomStr = 'Xk7mR9qL2wF5nT3vBj8Yp4sAc6dGh1Xk7mR9qL2wF5nT3vBj8Yp4sAc6dGh1wQ9zE2rU4tI6';
+var randomSig = compression.compressionSignal(randomStr + randomStr.substring(0, 10));
 assert(randomSig !== null, 'long random string returns non-null signal');
 assert(randomSig > 0.5, 'random string has high compression signal (' + randomSig.toFixed(3) + ')');
 

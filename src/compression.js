@@ -154,7 +154,7 @@ function clearCorpusCache() {
  * Higher signal = harder to compress = more random = more secret-like.
  */
 function compressionSignal(str) {
-  if (!str || str.length <= 20) return null;
+  if (!str || str.length <= 80) return null;
 
   var raw = Buffer.from(str, 'utf8');
   var compressed = zlib.gzipSync(raw, { level: 9 });

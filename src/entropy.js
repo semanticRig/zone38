@@ -1,7 +1,15 @@
 'use strict';
 
-// Shannon entropy calculator for secret detection
-// High-entropy strings in code are likely real secrets (API keys, tokens, passwords)
+// Entropy-based secret detection — hybrid pipeline
+// Replaces the old Shannon-threshold approach with a 5-stage pipeline:
+// decompose → charFrequency → bigram → compression → aggregate → (if ambiguous) vector
+
+var decomposer = require('./decomposer');
+var charFreq = require('./char-frequency');
+var bigramMod = require('./bigram');
+var compressionMod = require('./compression');
+var aggregator = require('./aggregator');
+var vectorEngine = require('./vector');
 
 /**
  * Calculates Shannon entropy of a string.
@@ -40,38 +48,7 @@ function detectCharset(str) {
   return 'mixed';
 }
 
-// Entropy thresholds per charset — above these = likely secret
-var THRESHOLDS = {
-  base64: 4.5,
-  hex: 3.0,
-  alphanumeric: 4.0,
-  mixed: 4.5,
-};
-
-// Theoretical max entropy per charset (log2 of charset size).
-// CHARSET_CEILING is the per-charset cap on adjusted thresholds.
-// null = no ceiling (allow multipliers to fully suppress findings for this charset).
-// For hex: context signals are authoritative — SHA hashes and OAuth IDs are
-//   indistinguishable from random hex by entropy alone, so trust the LHS + fallback.
-// For base64: structured OAuth IDs have H < 4.8; truly random keys have H ≥ 5.0,
-//   so cap at 4.9 to ensure random keys always fire even in suppression context.
-// For alphanumeric: analogous to base64, cap at 4.6.
-// For mixed: no common non-secret strings reach H > 4.5, no ceiling needed.
-var CHARSET_MAX = {
-  hex: 4.0,
-  base64: 6.0,
-  alphanumeric: 5.17,
-  mixed: 6.5,
-};
-
-var CHARSET_CEILING = {
-  hex: null,   // No ceiling — LHS + fallback context is authoritative for hex
-  base64: 4.9, // Separates structured OAuth IDs (H<4.8) from random keys (H≥5.0)
-  alphanumeric: 4.6,
-  mixed: null, // No ceiling — mixed strings have no structured non-secret pattern
-};
-
-// Strings starting with these prefixes are definitively secrets — bypass all threshold logic.
+// Strings starting with these prefixes are definitively secrets — bypass all pipeline logic.
 var SECRET_PREFIXES = [
   'sk-', 'ghp_', 'gho_', 'github_pat_',
   'AKIA', 'ASIA',
@@ -80,15 +57,9 @@ var SECRET_PREFIXES = [
   'glpat-',
 ];
 
-// LHS keywords that indicate the assigned variable is a secret (lower threshold)
-var SECRET_LHS_KEYWORDS = ['secret', 'key', 'token', 'password', 'private', 'auth', 'credential'];
-
-// LHS keywords that indicate the assigned variable is public config (raise threshold)
-var PUBLIC_LHS_KEYWORDS = ['id', 'client', 'app', 'public', 'url', 'base', 'endpoint', 'callback'];
-
 /**
  * Returns true if a string starts with any known secret service prefix.
- * These are always secrets regardless of entropy or context.
+ * These are always secrets regardless of pipeline signals.
  */
 function hasSecretPrefix(value) {
   for (var i = 0; i < SECRET_PREFIXES.length; i++) {
@@ -102,55 +73,25 @@ function hasSecretPrefix(value) {
  * Returns the LHS token (lowercased) or empty string if no assignment found.
  */
 function extractLHS(line) {
-  // Match: (optional: window.X =, var/let/const x =, x =) the identifier before =
   var match = line.match(/(?:^|[\s;])(?:var|let|const)?\s*([A-Za-z_$][A-Za-z0-9_$.]*)\s*=/);
   if (!match) return '';
   return match[1].toLowerCase();
 }
 
-/**
- * Calculates the adjusted entropy threshold for a string given its line context.
- * Applies LHS polarity and fallback-pattern multipliers, then caps at charset max × 0.90.
- */
-function adjustedThreshold(charset, line) {
-  var base = THRESHOLDS[charset];
-  var multiplier = 1.0;
-
-  // LHS polarity: check the variable name being assigned to
-  var lhs = extractLHS(line);
-  if (lhs) {
-    for (var s = 0; s < SECRET_LHS_KEYWORDS.length; s++) {
-      if (lhs.indexOf(SECRET_LHS_KEYWORDS[s]) !== -1) {
-        multiplier *= 0.8;  // secret keyword → lower threshold, flag more aggressively
-        break;
-      }
-    }
-    for (var p = 0; p < PUBLIC_LHS_KEYWORDS.length; p++) {
-      if (lhs.indexOf(PUBLIC_LHS_KEYWORDS[p]) !== -1) {
-        multiplier *= 1.3;  // public keyword → raise threshold, require stronger evidence
-        break;
-      }
-    }
-  }
-
-  // Fallback pattern: `x = x || 'value'` means this is a config default, not a secret
-  if (/[A-Za-z_$][A-Za-z0-9_$.]*\s*=\s*[A-Za-z_$][A-Za-z0-9_$.]*\s*\|\|/.test(line)) {
-    multiplier *= 1.5;
-  }
-
-  var adjusted = base * multiplier;
-
-  // Per-charset ceiling: prevents over-suppression of truly random keys.
-  // null means no ceiling — context is fully authoritative for this charset.
-  var ceiling = CHARSET_CEILING[charset];
-  if (ceiling !== null) {
-    adjusted = Math.min(adjusted, ceiling);
-  }
-  return adjusted;
-}
-
 // Minimum string length to consider for entropy analysis
 var MIN_STRING_LENGTH = 16;
+
+// Structural exclusions: patterns that are structurally impossible secrets.
+// Narrow and specific — NOT a catch-all gatekeeper like the old isSafeString().
+var STRUCTURAL_EXCLUSIONS = [
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, // UUID
+  /^https?:\/\//,                                                       // URLs
+  /^data:[a-z]+\/[a-z]+;base64,/,                                       // data URIs
+  /^(\.\/|\.\.\/|\/)./,                                                  // file paths
+];
+
+// LHS keywords that indicate the assigned variable is public config
+var PUBLIC_LHS_KEYWORDS = ['id', 'client', 'app', 'public', 'url', 'base', 'endpoint', 'callback'];
 
 /**
  * Extracts string literals from a line of code.
@@ -158,7 +99,6 @@ var MIN_STRING_LENGTH = 16;
  */
 function extractStrings(line) {
   var results = [];
-  // Match single-quoted, double-quoted, and backtick strings (no multiline)
   var regex = /(['"`])([^'"`\\]*(?:\\.[^'"`\\]*)*)\1/g;
   var match;
 
@@ -172,37 +112,26 @@ function extractStrings(line) {
   return results;
 }
 
-// Known safe patterns that look high-entropy but are not secrets
-var SAFE_PATTERNS = [
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, // UUID
-  /^https?:\/\//,                                                       // URLs
-  /^\/.+\/[gimsuvy]*$/,                                                  // regex patterns
-  /^data:[a-z]+\/[a-z]+;base64,/,                                       // data URIs
-  /^[A-Za-z\s.,!?;:'"()\-\/#%&@+=${}\[\]\\|*<>~^]+$/,                 // Prose/template text
-  /^\s+$/,                                                               // whitespace only
-  /^(\.\/|\.\.\/|\/)./,                                                  // file paths
-  /\$\{[^}]+\}/,                                                         // template literals with interpolation
-];
-
 /**
- * Checks if a string looks like a safe (non-secret) pattern.
+ * Runs a single value through the fast pipeline (Stages 2-4) and aggregator (Stage 5).
+ * Returns { score: number (0-100), decided: boolean, ambiguous: boolean }.
  */
-function isSafeString(value) {
-  for (var i = 0; i < SAFE_PATTERNS.length; i++) {
-    if (SAFE_PATTERNS[i].test(value)) return true;
-  }
-  return false;
+function pipelineAnalyze(value) {
+  var cfResult = charFreq.charFrequencySignal(value);
+  var bSig = bigramMod.bigramSignal(value, cfResult.charEntropy);
+  var cSig = compressionMod.compressionSignal(value);
+  return aggregator.aggregate(cfResult.signal, bSig, cSig);
 }
 
 /**
- * Analyzes a single line of code for high-entropy strings.
+ * Analyzes a single line of code for high-entropy strings using the hybrid pipeline.
  * Returns array of findings: { value, entropy, charset, threshold, lineNumber, line }
  */
 function analyzeLineEntropy(line, lineNumber) {
   var findings = [];
   var strings = extractStrings(line);
 
-  // Skip lines that are clearly comments
+  // Skip comment lines
   var trimmed = line.trim();
   if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
     return findings;
@@ -216,8 +145,7 @@ function analyzeLineEntropy(line, lineNumber) {
     var entropy = shannonEntropy(str.value);
     var charset = detectCharset(str.value);
 
-    // Known-prefix bypass: check BEFORE isSafeString so e.g. 'glpat-abcdef...'
-    // is not silenced by the prose-like safe pattern.
+    // Known-prefix bypass: always flag, skip pipeline
     if (hasSecretPrefix(str.value)) {
       findings.push({
         value: str.value,
@@ -231,20 +159,68 @@ function analyzeLineEntropy(line, lineNumber) {
       continue;
     }
 
-    if (isSafeString(str.value)) continue;
+    // Structural exclusion: URLs, UUIDs, data URIs, file paths cannot be secrets
+    var excluded = false;
+    for (var e = 0; e < STRUCTURAL_EXCLUSIONS.length; e++) {
+      if (STRUCTURAL_EXCLUSIONS[e].test(str.value)) {
+        excluded = true;
+        break;
+      }
+    }
+    if (excluded) continue;
 
-    // Context-aware threshold: adjusted for LHS polarity and fallback pattern,
-    // capped per charset so random keys always fire
-    var threshold = adjustedThreshold(charset, line);
+    // Stage 1: Decompose compound strings
+    var decomposed = decomposer.decompose(str.value);
+    var flaggedValues = [];
 
-    if (entropy >= threshold) {
+    for (var v = 0; v < decomposed.values.length; v++) {
+      var val = decomposed.values[v];
+      if (val.length < 8) continue; // Too short for meaningful signal analysis
+
+      // Stages 2-5: Fast pipeline
+      var result = pipelineAnalyze(val);
+
+      if (result.decided && result.score >= 60) {
+        // Decided secret
+        flaggedValues.push(val);
+      } else if (result.ambiguous) {
+        // Escalate to vector engine (Stage 6)
+        var vScore = vectorEngine.vectorScore(val);
+
+        // Context suppression for borderline findings:
+        // If vector score is not overwhelming AND line assigns to a public LHS
+        // with a fallback pattern, suppress — these are config defaults, not secrets.
+        if (vScore >= 0.5 && vScore < 0.7) {
+          var lhs = extractLHS(line);
+          if (lhs && /\|\|/.test(line)) {
+            var hasPublicLHS = false;
+            for (var pk = 0; pk < PUBLIC_LHS_KEYWORDS.length; pk++) {
+              if (lhs.indexOf(PUBLIC_LHS_KEYWORDS[pk]) !== -1) {
+                hasPublicLHS = true;
+                break;
+              }
+            }
+            if (hasPublicLHS) continue;
+          }
+        }
+
+        if (vScore >= 0.5) {
+          flaggedValues.push(val);
+        }
+      }
+      // decided && score < 60: safe, skip
+    }
+
+    if (flaggedValues.length > 0) {
+      // Report the finding using the original string value for consistency
       findings.push({
         value: str.value,
         entropy: Math.round(entropy * 100) / 100,
         charset: charset,
-        threshold: Math.round(threshold * 100) / 100,
+        threshold: 0,
         lineNumber: lineNumber,
         line: line,
+        flaggedValues: flaggedValues,
       });
     }
   }
@@ -274,13 +250,9 @@ module.exports = {
   extractStrings: extractStrings,
   analyzeLineEntropy: analyzeLineEntropy,
   analyzeFileEntropy: analyzeFileEntropy,
-  isSafeString: isSafeString,
   hasSecretPrefix: hasSecretPrefix,
-  adjustedThreshold: adjustedThreshold,
   extractLHS: extractLHS,
-  THRESHOLDS: THRESHOLDS,
-  CHARSET_MAX: CHARSET_MAX,
-  CHARSET_CEILING: CHARSET_CEILING,
+  pipelineAnalyze: pipelineAnalyze,
   SECRET_PREFIXES: SECRET_PREFIXES,
   MIN_STRING_LENGTH: MIN_STRING_LENGTH,
 };

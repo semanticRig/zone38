@@ -1,68 +1,21 @@
 'use strict';
 
 // Layer 15 — Output Formatting
-// Renders the report from Layer 14 to either CLI (ANSI colour) or JSON.
-// Handles --verbose (contributing signals per finding), --json, --axis filter,
-// --threshold override, exit code logic, and roast messages.
+// Renders the report from Layer 14 to CLI (ANSI) or JSON.
+// Two distinct CLI modes: single-file (full detail) and directory (summary + gated detail).
 
 // ---------------------------------------------------------------------------
-// ANSI escape codes
+// ANSI — exactly four colour states, nothing else
 // ---------------------------------------------------------------------------
-var RESET   = '\x1b[0m';
-var BOLD    = '\x1b[1m';
-var DIM     = '\x1b[2m';
-var RED     = '\x1b[31m';
-var GREEN   = '\x1b[32m';
-var YELLOW  = '\x1b[33m';
-var CYAN    = '\x1b[36m';
-var WHITE   = '\x1b[37m';
-var BG_RED  = '\x1b[41m';
-var BG_GREEN = '\x1b[42m';
-
-// ---------------------------------------------------------------------------
-// Roast messages — per axis + combined
-// ---------------------------------------------------------------------------
-var ROASTS_A = [
-  { max: 10,  msg: 'Looking clean. Your tech lead would be proud.' },
-  { max: 25,  msg: 'A little sloppy, but nothing a quick review can\'t fix.' },
-  { max: 50,  msg: 'This code has that unmistakable AI aftertaste.' },
-  { max: 75,  msg: 'Did you even read what the AI wrote before committing?' },
-  { max: 100, msg: 'This is pure, uncut AI slop. Your tech lead is writing the Slack message.' },
-];
-
-var ROASTS_B = [
-  { max: 10,  msg: 'Secrets are safe. For now.' },
-  { max: 25,  msg: 'A few exposure risks. Fix before someone finds them.' },
-  { max: 50,  msg: 'There are secrets in here that want to be free. Don\'t let them.' },
-  { max: 75,  msg: 'This is a security incident waiting to happen.' },
-  { max: 100, msg: 'Congratulations, you\'ve built a honeypot. Your secrets are everyone\'s secrets.' },
-];
-
-var ROASTS_C = [
-  { max: 10,  msg: 'Solid craftsmanship.' },
-  { max: 25,  msg: 'Mostly clean, a few rough edges.' },
-  { max: 50,  msg: 'The code works, but nobody wants to maintain it.' },
-  { max: 75,  msg: 'Tech debt is accruing interest.' },
-  { max: 100, msg: 'This codebase is a load-bearing house of cards.' },
-];
-
-function _getRoast(score, roasts) {
-  for (var i = 0; i < roasts.length; i++) {
-    if (score <= roasts[i].max) return roasts[i].msg;
-  }
-  return roasts[roasts.length - 1].msg;
-}
+var RESET  = '\x1b[0m';
+var BOLD   = '\x1b[1m';    // section headers (bright white)
+var DIM    = '\x1b[2m';    // clean / pass / structural
+var YELLOW = '\x1b[33m';   // warning
+var RED    = '\x1b[31m';   // critical
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function _scoreColor(score) {
-  if (score <= 10) return GREEN;
-  if (score <= 25) return YELLOW;
-  if (score <= 50) return YELLOW;
-  return RED;
-}
 
 function _padLeft(str, len) {
   str = String(str);
@@ -70,26 +23,46 @@ function _padLeft(str, len) {
   return str;
 }
 
-function _severityColor(sev) {
-  if (sev >= 9) return RED + BOLD;
-  if (sev >= 7) return RED;
-  if (sev >= 5) return YELLOW;
-  if (sev >= 3) return CYAN;
-  return DIM;
+function _padRight(str, len) {
+  str = String(str);
+  while (str.length < len) str += ' ';
+  return str;
 }
 
-function _axisEmoji(score) {
-  if (score <= 10) return '\u2705';   // checkmark
-  if (score <= 25) return '\u26A0\uFE0F';  // warning
-  if (score <= 50) return '\u{1F7E1}';  // yellow circle
-  return '\u274C';                      // red X
+function _scoreColor(score) {
+  if (score <= 10) return '';     // default terminal
+  if (score <= 50) return YELLOW;
+  return RED;
 }
 
+// Verdict labels — uppercase, no fluff
+var VERDICT_MAP = {
+  'Clean':       'CLEAN',
+  'Minimal':     'MINIMAL',
+  'Some issues': 'SOME ISSUES',
+  'Concerning':  'NOTICEABLE',
+  'Heavy':       'HEAVY',
+  'Critical':    'CATASTROPHIC',
+};
+
+function _verdictLabel(verdict) {
+  return VERDICT_MAP[verdict] || (verdict || '').toUpperCase();
+}
+
+// Bar: filled = \u2500 (horizontal line), empty = \u2591 (light shade)
 function _bar(score, width) {
   var filled = Math.round(score / 100 * width);
+  if (filled > width) filled = width;
   var empty = width - filled;
-  var color = _scoreColor(score);
-  return color + '\u2588'.repeat(filled) + RESET + DIM + '\u2591'.repeat(empty) + RESET;
+  return '\u2500'.repeat(filled) + '\u2591'.repeat(empty);
+}
+
+// Signal strength label for review display
+function _signalLabel(val) {
+  if (val == null) return '?';
+  if (val < 0.33) return 'low';
+  if (val < 0.66) return 'medium';
+  return 'high';
 }
 
 // Parse --axis=A,B,C filter
@@ -124,168 +97,538 @@ function _parseThresholds(thresholdArg) {
   return t;
 }
 
+// Number with commas
+function _commaNum(n) {
+  var s = String(n);
+  var parts = [];
+  while (s.length > 3) {
+    parts.unshift(s.slice(-3));
+    s = s.slice(0, -3);
+  }
+  parts.unshift(s);
+  return parts.join(',');
+}
+
+// Count items per file from an array of objects with .file property
+function _countByFile(items) {
+  var map = {};
+  for (var i = 0; i < items.length; i++) {
+    var f = items[i].file;
+    map[f] = (map[f] || 0) + 1;
+  }
+  return map;
+}
+
+// Short filename from a path
+function _basename(filePath) {
+  if (!filePath) return '';
+  var idx = filePath.lastIndexOf('/');
+  return idx >= 0 ? filePath.slice(idx + 1) : filePath;
+}
+
 // ---------------------------------------------------------------------------
-// CLI Renderer
+// Shared axis table
 // ---------------------------------------------------------------------------
 
-function renderCli(report, opts) {
-  opts = opts || {};
-  var verbose = opts.verbose || false;
-  var axisFilter = _parseAxisFilter(opts.axis);
+var AXIS_DEFS = [
+  { key: 'A', label: 'AI SLOP' },
+  { key: 'B', label: 'SECURITY' },
+  { key: 'C', label: 'QUALITY' },
+];
+
+function _renderAxisTable(axes, verdicts, axisFilter) {
   var lines = [];
+  for (var i = 0; i < AXIS_DEFS.length; i++) {
+    var d = AXIS_DEFS[i];
+    if (axisFilter && !axisFilter[d.key]) continue;
+    var sc = axes[d.key] || 0;
+    var color = _scoreColor(sc);
+    var vLabel = _verdictLabel(verdicts[d.key] || 'Clean');
+    lines.push('  ' + d.key + '  ' + _padRight(d.label, 13)
+      + color + _padLeft(sc.toFixed(1), 5) + RESET
+      + '   ' + color + _bar(sc, 23) + RESET
+      + '  ' + color + vLabel + RESET);
+  }
+  return lines;
+}
 
+// ---------------------------------------------------------------------------
+// Exit line
+// ---------------------------------------------------------------------------
+
+function _renderExitLine(code, axes, thresholds) {
+  var t = thresholds || DEFAULT_THRESHOLDS;
+  if (code === 0) {
+    return '  EXIT 0' + DIM + '  \u00b7  all axes within thresholds' + RESET;
+  }
+  var reasons = [];
+  if ((axes.A || 0) > t.A) reasons.push('Axis A exceeds threshold (' + t.A + ')');
+  if ((axes.B || 0) > t.B) reasons.push('Axis B exceeds threshold (' + t.B + ')');
+  if ((axes.C || 0) > t.C) reasons.push('Axis C exceeds threshold (' + t.C + ')');
+  return '  EXIT 1' + DIM + '  \u00b7  ' + reasons.join(', ') + RESET;
+}
+
+// ---------------------------------------------------------------------------
+// Pattern hits section
+// ---------------------------------------------------------------------------
+
+function _renderPatternHits(hits, fileFilter) {
+  if (!hits || hits.length === 0) return [];
+  var filtered = hits;
+  if (fileFilter) {
+    filtered = [];
+    for (var f = 0; f < hits.length; f++) {
+      if (hits[f].file === fileFilter) filtered.push(hits[f]);
+    }
+  }
+  if (filtered.length === 0) return [];
+
+  var lines = [];
+  lines.push('');
+  lines.push(BOLD + 'PATTERN HITS' + RESET + '  (' + filtered.length + ')');
+  lines.push('');
+  for (var i = 0; i < filtered.length; i++) {
+    var ph = filtered[i];
+    var lineNum = _padLeft('L' + (ph.line + 1), 6);
+    var ruleCol = Math.max(ph.ruleId.length + 1, 24);
+    var ruleLabel = _padRight(ph.ruleId, ruleCol);
+    var src = (ph.source || '').trim();
+    if (src.length > 60) src = src.substring(0, 60) + '\u2026';
+    lines.push('  ' + lineNum + '  ' + ruleLabel + DIM + src + RESET);
+    lines.push('  ' + _padRight('', 6) + '  ' + DIM + '\u2192 ' + ph.fix + RESET);
+  }
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
+// Review bucket section
+// ---------------------------------------------------------------------------
+
+function _renderReview(items, fileFilter) {
+  if (!items || items.length === 0) return [];
+  var filtered = items;
+  if (fileFilter) {
+    filtered = [];
+    for (var f = 0; f < items.length; f++) {
+      if (items[f].file === fileFilter) filtered.push(items[f]);
+    }
+  }
+  if (filtered.length === 0) return [];
+
+  var lines = [];
+  lines.push('');
+  lines.push(BOLD + 'REVIEW' + RESET + '  (' + filtered.length + ' uncertain \u2014 human judgment required)');
+  lines.push('');
+  for (var i = 0; i < filtered.length; i++) {
+    var rv = filtered[i];
+    var lineNum = _padLeft('L' + (rv.line + 1), 6);
+    var score = 'score=' + rv.pipelineScore.toFixed(2);
+    var shape = _padRight(rv.shape || 'mixed', 14);
+    var len = 'len=' + _padLeft(String(rv.valueLength || 0), 3);
+    var cf = 'char-freq:' + _signalLabel(rv.charFreqSignal);
+    var bg = 'bigram:' + _signalLabel(rv.bigramSignal);
+    lines.push('  ' + lineNum + '  ' + DIM + score + '  ' + shape + len + '   ' + cf + '  ' + bg + RESET);
+  }
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
+// Secrets section
+// ---------------------------------------------------------------------------
+
+function _renderSecrets(items, fileFilter) {
+  if (!items || items.length === 0) return [];
+  var filtered = items;
+  if (fileFilter) {
+    filtered = [];
+    for (var f = 0; f < items.length; f++) {
+      if (items[f].file === fileFilter) filtered.push(items[f]);
+    }
+  }
+  if (filtered.length === 0) return [];
+
+  var lines = [];
+  lines.push('');
+  lines.push(BOLD + 'SECRETS' + RESET + '  (' + filtered.length + ' confirmed)');
+  lines.push('');
+  for (var i = 0; i < filtered.length; i++) {
+    var sec = filtered[i];
+    var lineNum = _padLeft('L' + (sec.line + 1), 6);
+    var conf = sec.confidence;
+    var shape = _padRight(sec.shape || 'mixed', 14);
+    var len = 'len=' + _padLeft(String(sec.valueLength || 0), 3);
+    lines.push('  ' + lineNum + '  ' + RED + conf + RESET + '  ' + DIM + shape + len
+      + '  ' + sec.file + RESET);
+  }
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
+// Exposure section
+// ---------------------------------------------------------------------------
+
+function _renderExposure(items, fileFilter) {
+  if (!items || items.length === 0) return [];
+  var filtered = items;
+  if (fileFilter) {
+    filtered = [];
+    for (var f = 0; f < items.length; f++) {
+      if (items[f].file === fileFilter) filtered.push(items[f]);
+    }
+  }
+  if (filtered.length === 0) return [];
+
+  var lines = [];
+  lines.push('');
+  lines.push(BOLD + 'EXPOSURE' + RESET + '  (' + filtered.length + ' URLs)');
+  lines.push('');
+  for (var i = 0; i < filtered.length; i++) {
+    var exp = filtered[i];
+    var lineNum = _padLeft('L' + (exp.line + 1), 6);
+    lines.push('  ' + lineNum + '  ' + YELLOW + exp.url + RESET + '  '
+      + DIM + exp.classification + '  ' + exp.file + RESET);
+  }
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
+// Slop breakdown section (verbose only)
+// ---------------------------------------------------------------------------
+
+function _renderSlopBreakdown(items) {
+  if (!items || items.length === 0) return [];
+  var lines = [];
+  lines.push('');
+  lines.push(BOLD + 'SLOP BREAKDOWN' + RESET);
+  lines.push('');
+  for (var i = 0; i < items.length; i++) {
+    var bd = items[i];
+    lines.push('  ' + _padLeft(String(bd.hitCount), 4) + ' hits  '
+      + DIM + _padLeft(String(bd.fileCount), 3) + ' files' + RESET
+      + '  ' + _padRight(bd.category, 22) + DIM + 'top sev: ' + bd.topSeverity + RESET);
+  }
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
+// Correlation section
+// ---------------------------------------------------------------------------
+
+function _renderCorrelation(correlation) {
+  if (!correlation) return [];
+  var lines = [];
+  var any = false;
+
+  if (correlation.duplicateSecrets && correlation.duplicateSecrets.length > 0) {
+    if (!any) { lines.push(''); lines.push(BOLD + 'CORRELATION' + RESET); lines.push(''); any = true; }
+    var ds = correlation.duplicateSecrets;
+    var totalFiles = 0;
+    for (var d = 0; d < ds.length; d++) totalFiles += ds[d].fileCount;
+    lines.push('  ' + ds.length + ' duplicate secret candidate' + (ds.length > 1 ? 's' : '')
+      + ' appear across ' + totalFiles + ' file' + (totalFiles > 1 ? 's' : ''));
+  }
+
+  if (correlation.slopClusters && correlation.slopClusters.length > 0) {
+    if (!any) { lines.push(''); lines.push(BOLD + 'CORRELATION' + RESET); lines.push(''); any = true; }
+    for (var s = 0; s < correlation.slopClusters.length; s++) {
+      var cl = correlation.slopClusters[s];
+      lines.push('  1 slop cluster detected in ' + cl.directory
+        + ' (' + cl.fileCount + ' files, dominant: ' + cl.category + ')');
+    }
+  }
+
+  if (correlation.clonePollutionMap && correlation.clonePollutionMap.length > 0) {
+    if (!any) { lines.push(''); lines.push(BOLD + 'CORRELATION' + RESET); lines.push(''); any = true; }
+    lines.push('  ' + correlation.clonePollutionMap.length
+      + ' duplicated function' + (correlation.clonePollutionMap.length > 1 ? 's' : '')
+      + ' across multiple files');
+  }
+
+  return lines;
+}
+
+// Verdict from score (mirrors L14 thresholds)
+function _verdictFromScore(score) {
+  if (score <= 0)  return 'Clean';
+  if (score <= 10) return 'Minimal';
+  if (score <= 25) return 'Some issues';
+  if (score <= 50) return 'Concerning';
+  if (score <= 75) return 'Heavy';
+  return 'Critical';
+}
+
+// ---------------------------------------------------------------------------
+// Single-file mode
+// ---------------------------------------------------------------------------
+
+function _renderSingleFile(report, opts) {
+  var lines = [];
   var summary = report.projectSummary || {};
   var axes = summary.axes || { A: 0, B: 0, C: 0 };
   var verdicts = summary.verdicts || { A: 'Clean', B: 'Clean', C: 'Clean' };
+  var axisFilter = _parseAxisFilter(opts.axis);
+  var thresholds = opts.thresholds || DEFAULT_THRESHOLDS;
+  var code = exitCode(axes, thresholds);
 
-  // --- Header ---
-  lines.push('');
-  lines.push('  ' + BOLD + CYAN + 'slopguard v2' + RESET + DIM + ' \u2014 AI slop detector' + RESET);
-  if (opts.targetPath) {
-    lines.push('  ' + DIM + opts.targetPath + RESET);
-  }
-  lines.push('');
+  // Single file info
+  var pf = (report.perFile && report.perFile[0]) || {};
+  var fileName = pf.path || _basename(opts.targetPath || '');
+  var lineCount = pf.lineCount || summary.totalLines || 0;
 
-  // --- Three-axis display ---
-  lines.push('  ' + BOLD + 'Scoring Axes' + RESET);
+  // Header
   lines.push('');
-  var axisLabels = { A: 'AI Slop Risk    ', B: 'Security Exposure', C: 'Code Quality     ' };
-  var axisKeys = ['A', 'B', 'C'];
-  for (var a = 0; a < axisKeys.length; a++) {
-    var ak = axisKeys[a];
-    if (axisFilter && !axisFilter[ak]) continue;
-    var sc = axes[ak] || 0;
-    lines.push('  ' + _axisEmoji(sc) + ' Axis ' + ak + ': ' + axisLabels[ak] + '  '
-      + _bar(sc, 20) + '  ' + _scoreColor(sc) + BOLD + _padLeft(sc, 3) + RESET + '/100'
-      + '  ' + DIM + verdicts[ak] + RESET);
-  }
+  lines.push(BOLD + 'SLOPGUARD v2' + RESET + DIM + '  \u00b7  ' + fileName
+    + '  \u00b7  ' + _commaNum(lineCount) + ' lines' + RESET);
   lines.push('');
 
-  // --- Roasts ---
-  if (!axisFilter || axisFilter.A) {
-    lines.push('  ' + DIM + '"' + _getRoast(axes.A || 0, ROASTS_A) + '"' + RESET);
-  }
-  if (axes.B > 10 && (!axisFilter || axisFilter.B)) {
-    lines.push('  ' + DIM + '"' + _getRoast(axes.B || 0, ROASTS_B) + '"' + RESET);
-  }
-  if (axes.C > 25 && (!axisFilter || axisFilter.C)) {
-    lines.push('  ' + DIM + '"' + _getRoast(axes.C || 0, ROASTS_C) + '"' + RESET);
-  }
+  // Axis table
+  var axisLines = _renderAxisTable(axes, verdicts, axisFilter);
+  for (var a = 0; a < axisLines.length; a++) lines.push(axisLines[a]);
   lines.push('');
 
-  // --- Project stats ---
-  lines.push('  ' + DIM + (summary.fileCount || 0) + ' files scanned | '
-    + (summary.totalLines || 0) + ' lines' + RESET);
+  // Exit line
+  lines.push(_renderExitLine(code, axes, thresholds));
+
+  // Pattern hits (always shown in single-file mode)
+  var phLines = _renderPatternHits(report.patternHits);
+  for (var p = 0; p < phLines.length; p++) lines.push(phLines[p]);
+
+  // Secrets
+  var secLines = _renderSecrets(report.secrets);
+  for (var si = 0; si < secLines.length; si++) lines.push(secLines[si]);
+
+  // Exposure
+  var expLines = _renderExposure(report.exposure);
+  for (var e = 0; e < expLines.length; e++) lines.push(expLines[e]);
+
+  // Review bucket
+  var rvLines = _renderReview(report.review);
+  for (var r = 0; r < rvLines.length; r++) lines.push(rvLines[r]);
+
+  // Verbose: slop breakdown
+  if (opts.verbose && report.slopBreakdown) {
+    var bdLines = _renderSlopBreakdown(report.slopBreakdown);
+    for (var b = 0; b < bdLines.length; b++) lines.push(bdLines[b]);
+  }
+
+  lines.push('');
+  return lines.join('\n') + '\n';
+}
+
+// ---------------------------------------------------------------------------
+// Directory mode
+// ---------------------------------------------------------------------------
+
+function _renderDirectory(report, opts) {
+  var lines = [];
+  var summary = report.projectSummary || {};
+  var axes = summary.axes || { A: 0, B: 0, C: 0 };
+  var verdicts = summary.verdicts || { A: 'Clean', B: 'Clean', C: 'Clean' };
+  var axisFilter = _parseAxisFilter(opts.axis);
+  var thresholds = opts.thresholds || DEFAULT_THRESHOLDS;
+  var code = exitCode(axes, thresholds);
+
+  // Per-file stats: count patterns, review, exposure per file
+  var patternsByFile = _countByFile(report.patternHits || []);
+  var reviewByFile   = _countByFile(report.review || []);
+  var exposureByFile = _countByFile(report.exposure || []);
+
+  // Header
+  lines.push('');
+  lines.push(BOLD + 'SLOPGUARD v2' + RESET + DIM + '  \u00b7  ' + (opts.targetPath || '.')
+    + '  \u00b7  ' + (summary.fileCount || 0) + ' files'
+    + '  \u00b7  ' + _commaNum(summary.totalLines || 0) + ' lines' + RESET);
   lines.push('');
 
-  // --- Per-file results ---
+  // Axis table
+  var axisLines = _renderAxisTable(axes, verdicts, axisFilter);
+  for (var a = 0; a < axisLines.length; a++) lines.push(axisLines[a]);
+  lines.push('');
+
+  // Exit line
+  lines.push(_renderExitLine(code, axes, thresholds));
+
+  // Sort per-file by max axis score descending
   var perFile = (report.perFile || []).slice();
-  // Sort by max axis score descending
   perFile.sort(function (a, b) {
     var aMax = Math.max(a.axes.A, a.axes.B, a.axes.C);
     var bMax = Math.max(b.axes.A, b.axes.B, b.axes.C);
     return bMax - aMax;
   });
 
-  if (perFile.length > 0) {
-    lines.push('  ' + BOLD + 'Per-file scores:' + RESET);
+  // --- Top offenders: files with any axis above minimal ---
+  var offenders = [];
+  for (var oi = 0; oi < perFile.length; oi++) {
+    var opf = perFile[oi];
+    if (Math.max(opf.axes.A, opf.axes.B, opf.axes.C) > 10) {
+      offenders.push(opf);
+    }
+  }
+
+  if (offenders.length > 0) {
     lines.push('');
-    for (var fi = 0; fi < perFile.length; fi++) {
-      var pf = perFile[fi];
-      var maxScore = Math.max(pf.axes.A, pf.axes.B, pf.axes.C);
-      var fc = _scoreColor(maxScore);
-      var axisStr = '';
-      for (var ai = 0; ai < axisKeys.length; ai++) {
-        var axk = axisKeys[ai];
-        if (axisFilter && !axisFilter[axk]) continue;
-        if (axisStr) axisStr += DIM + ' | ' + RESET;
-        axisStr += axk + ':' + _scoreColor(pf.axes[axk]) + _padLeft(pf.axes[axk], 3) + RESET;
+    lines.push(BOLD + 'TOP OFFENDERS' + RESET);
+    lines.push('');
+    // Compute column width from longest path in visible set
+    var showCount = Math.min(offenders.length, 10);
+    var maxPathLen = 20;
+    for (var pi2 = 0; pi2 < showCount; pi2++) {
+      if (offenders[pi2].path.length > maxPathLen) maxPathLen = offenders[pi2].path.length;
+    }
+    var pathCol = maxPathLen + 2;
+    for (var ti = 0; ti < showCount; ti++) {
+      var tf = offenders[ti];
+      var aColor = _scoreColor(tf.axes.A);
+      var bColor = _scoreColor(tf.axes.B);
+      var cColor = _scoreColor(tf.axes.C);
+      var pCount = patternsByFile[tf.path] || 0;
+      var rCount = reviewByFile[tf.path] || 0;
+      var row = '  '
+        + 'A:' + aColor + _padLeft(Math.round(tf.axes.A), 3) + RESET + '  '
+        + 'B:' + bColor + _padLeft(Math.round(tf.axes.B), 3) + RESET + '  '
+        + 'C:' + cColor + _padLeft(Math.round(tf.axes.C), 3) + RESET + '   '
+        + _padRight(tf.path, pathCol)
+        + DIM + 'patterns:' + _padLeft(String(pCount), 3) + '  review:' + rCount + RESET;
+      lines.push(row);
+    }
+    if (offenders.length > showCount) {
+      lines.push('  ' + DIM + '[and ' + (offenders.length - showCount) + ' more \u2014 use --verbose to expand]' + RESET);
+    }
+  }
+
+  // --- Axis B concerns ---
+  var bConcerns = [];
+  for (var bi = 0; bi < perFile.length; bi++) {
+    if (perFile[bi].axes.B > 1) bConcerns.push(perFile[bi]);
+  }
+  bConcerns.sort(function (a, b) { return b.axes.B - a.axes.B; });
+  var bShowMax = 10;
+
+  if (bConcerns.length > 0) {
+    lines.push('');
+    lines.push(BOLD + 'AXIS B CONCERNS' + RESET + DIM + '  (files with security exposure)' + RESET);
+    lines.push('');
+    var bShowCount = Math.min(bConcerns.length, bShowMax);
+    for (var bci = 0; bci < bShowCount; bci++) {
+      var bcf = bConcerns[bci];
+      var bRevCount = reviewByFile[bcf.path] || 0;
+      var bExpCount = exposureByFile[bcf.path] || 0;
+      var details = [];
+      if (bRevCount > 0) details.push(bRevCount + ' uncertain candidate' + (bRevCount > 1 ? 's' : ''));
+      if (bExpCount > 0) details.push(bExpCount + ' URL' + (bExpCount > 1 ? 's' : ''));
+      var bsc = _scoreColor(bcf.axes.B);
+      lines.push('  B:' + bsc + _padLeft(Math.round(bcf.axes.B), 3) + RESET + '  '
+        + bcf.path + (details.length > 0 ? '  ' + DIM + '\u2192  ' + details.join('  ') + RESET : ''));
+    }
+    if (bConcerns.length > bShowCount) {
+      lines.push('  ' + DIM + '[and ' + (bConcerns.length - bShowCount) + ' more]' + RESET);
+    }
+  }
+
+  // --- Clean files ---
+  var cleanFiles = report.cleanFiles || [];
+  if (cleanFiles.length > 0) {
+    lines.push('');
+    lines.push(BOLD + 'CLEAN' + RESET + DIM + '  (' + cleanFiles.length + ' file' + (cleanFiles.length > 1 ? 's' : '') + ')' + RESET);
+    var cleanNames = [];
+    var showClean = Math.min(cleanFiles.length, 8);
+    for (var ci = 0; ci < showClean; ci++) {
+      cleanNames.push(_basename(cleanFiles[ci].file));
+    }
+    lines.push('  ' + DIM + cleanNames.join('  ') + RESET);
+    if (cleanFiles.length > showClean) {
+      lines.push('  ' + DIM + '[and ' + (cleanFiles.length - showClean) + ' more \u2014 use --verbose to list all]' + RESET);
+    }
+  }
+
+  // --- Correlation ---
+  var corrLines = _renderCorrelation(summary.correlation);
+  for (var cri = 0; cri < corrLines.length; cri++) lines.push(corrLines[cri]);
+
+  // --- Project-level slop breakdown (verbose/all) ---
+  if ((opts.verbose || opts.all) && report.slopBreakdown) {
+    var bdLines = _renderSlopBreakdown(report.slopBreakdown);
+    for (var bdi = 0; bdi < bdLines.length; bdi++) lines.push(bdLines[bdi]);
+  }
+
+  // ===================================================================
+  // Per-file detail: gated behind --verbose, --all, or --file=X
+  // ===================================================================
+
+  var fileArg = opts.file || null;
+  var showAll = opts.all || false;
+  var verbose = opts.verbose || false;
+
+  var detailFiles = [];
+  if (fileArg) {
+    for (var dfi = 0; dfi < perFile.length; dfi++) {
+      if (perFile[dfi].path === fileArg || _basename(perFile[dfi].path) === fileArg) {
+        detailFiles.push(perFile[dfi]);
+        break;
       }
-      lines.push('    ' + fc + _padLeft(maxScore, 3) + RESET + ' ' + pf.path + '  ' + axisStr);
     }
-    lines.push('');
-  }
-
-  // --- Pattern hits (verbose) ---
-  if (verbose && report.patternHits && report.patternHits.length > 0) {
-    lines.push('  ' + BOLD + 'Pattern hits:' + RESET);
-    lines.push('');
-    for (var pi = 0; pi < report.patternHits.length; pi++) {
-      var ph = report.patternHits[pi];
-      var sevC = _severityColor(ph.severity);
-      lines.push('    ' + sevC + 'L' + (ph.line + 1) + RESET + ' ' + DIM + '[' + ph.category + ']' + RESET + ' ' + ph.ruleName + '  ' + DIM + ph.file + RESET);
-      if (ph.source) {
-        lines.push('    ' + DIM + (ph.source || '').trim().substring(0, 80) + RESET);
+  } else if (showAll) {
+    detailFiles = perFile;
+  } else if (verbose) {
+    for (var vfi = 0; vfi < perFile.length; vfi++) {
+      var vpf = perFile[vfi];
+      if (Math.max(vpf.axes.A, vpf.axes.B, vpf.axes.C) > 10) {
+        detailFiles.push(vpf);
       }
-      lines.push('    ' + GREEN + '\u21B3 ' + ph.fix + RESET);
     }
-    lines.push('');
   }
 
-  // --- Secrets ---
-  if (report.secrets && report.secrets.length > 0) {
-    lines.push('  ' + BOLD + RED + 'Secrets detected:' + RESET);
+  if (detailFiles.length > 0) {
     lines.push('');
-    for (var si = 0; si < report.secrets.length; si++) {
-      var sec = report.secrets[si];
-      lines.push('    ' + RED + BOLD + sec.value + RESET + '  ' + DIM + sec.file + ':' + (sec.line + 1)
-        + ' [' + sec.confidence + ', ' + sec.signals + ' signals]' + RESET);
+    for (var dti = 0; dti < detailFiles.length; dti++) {
+      var df = detailFiles[dti];
+      lines.push('');
+      lines.push(BOLD + '\u2500\u2500 ' + df.path + RESET + DIM
+        + '  (' + _commaNum(df.lineCount || 0) + ' lines)' + RESET);
+      lines.push('');
+
+      var dfAxes = df.axes || { A: 0, B: 0, C: 0 };
+      var dfVerdicts = {};
+      for (var dak = 0; dak < AXIS_DEFS.length; dak++) {
+        var dk = AXIS_DEFS[dak].key;
+        dfVerdicts[dk] = _verdictFromScore(dfAxes[dk]);
+      }
+      var dfAxisLines = _renderAxisTable(dfAxes, dfVerdicts, axisFilter);
+      for (var dal = 0; dal < dfAxisLines.length; dal++) lines.push(dfAxisLines[dal]);
+
+      // Pattern hits for this file
+      var dfPh = _renderPatternHits(report.patternHits, df.path);
+      for (var dpi = 0; dpi < dfPh.length; dpi++) lines.push(dfPh[dpi]);
+
+      // Secrets for this file
+      var dfSec = _renderSecrets(report.secrets, df.path);
+      for (var dsi = 0; dsi < dfSec.length; dsi++) lines.push(dfSec[dsi]);
+
+      // Exposure for this file
+      var dfExp = _renderExposure(report.exposure, df.path);
+      for (var dei = 0; dei < dfExp.length; dei++) lines.push(dfExp[dei]);
+
+      // Review for this file
+      var dfRv = _renderReview(report.review, df.path);
+      for (var dri = 0; dri < dfRv.length; dri++) lines.push(dfRv[dri]);
     }
-    lines.push('');
   }
 
-  // --- Exposure ---
-  if (report.exposure && report.exposure.length > 0) {
-    lines.push('  ' + BOLD + YELLOW + 'Exposure risks:' + RESET);
-    lines.push('');
-    for (var ei = 0; ei < report.exposure.length; ei++) {
-      var exp = report.exposure[ei];
-      lines.push('    ' + YELLOW + exp.url + RESET + '  ' + DIM + exp.file + ':' + (exp.line + 1) + '  [' + exp.classification + ']' + RESET);
-    }
-    lines.push('');
-  }
-
-  // --- Slop breakdown (verbose) ---
-  if (verbose && report.slopBreakdown && report.slopBreakdown.length > 0) {
-    lines.push('  ' + BOLD + 'Slop breakdown by category:' + RESET);
-    lines.push('');
-    for (var bi = 0; bi < report.slopBreakdown.length; bi++) {
-      var bd = report.slopBreakdown[bi];
-      lines.push('    ' + _padLeft(bd.hitCount, 3) + ' hits  ' + DIM + bd.fileCount + ' files' + RESET
-        + '  ' + bd.category + '  ' + DIM + '(top sev: ' + bd.topSeverity + ')' + RESET);
-    }
-    lines.push('');
-  }
-
-  // --- Review bucket (UNCERTAIN findings) ---
-  if (report.review && report.review.length > 0) {
-    lines.push('  ' + BOLD + DIM + 'Review bucket (uncertain \u2014 needs human judgment):' + RESET);
-    lines.push('');
-    for (var ri = 0; ri < report.review.length; ri++) {
-      var rv = report.review[ri];
-      lines.push('    ' + DIM + rv.value + '  ' + rv.file + ':' + (rv.line + 1)
-        + '  score=' + rv.pipelineScore.toFixed(2) + RESET);
-    }
-    lines.push('');
-  }
-
-  // --- Correlation (verbose) ---
-  if (verbose && summary.correlation) {
-    var corr = summary.correlation;
-    if (corr.duplicateSecrets && corr.duplicateSecrets.length > 0) {
-      lines.push('  ' + BOLD + 'Cross-file duplicate secrets: ' + corr.duplicateSecrets.length + RESET);
-    }
-    if (corr.slopClusters && corr.slopClusters.length > 0) {
-      lines.push('  ' + BOLD + 'Slop clusters: ' + corr.slopClusters.length + RESET);
-    }
-    if (corr.clonePollutionMap && corr.clonePollutionMap.length > 0) {
-      lines.push('  ' + BOLD + 'Clone pollution: ' + corr.clonePollutionMap.length + ' duplicated functions' + RESET);
-    }
-    lines.push('');
-  }
-
-  // --- Footer ---
+  lines.push('');
   return lines.join('\n') + '\n';
+}
+
+// ---------------------------------------------------------------------------
+// Main CLI renderer
+// ---------------------------------------------------------------------------
+
+function renderCli(report, opts) {
+  opts = opts || {};
+  var perFile = report.perFile || [];
+  if (perFile.length <= 1) {
+    return _renderSingleFile(report, opts);
+  }
+  return _renderDirectory(report, opts);
 }
 
 // ---------------------------------------------------------------------------
@@ -308,20 +651,9 @@ function exitCode(axes, thresholds) {
   return 0;
 }
 
-// ---------------------------------------------------------------------------
-// Pass/fail banner
-// ---------------------------------------------------------------------------
-
-function renderBanner(code, axes, thresholds) {
-  var t = thresholds || DEFAULT_THRESHOLDS;
-  if (code === 0) {
-    return '  ' + BG_GREEN + WHITE + BOLD + ' PASS ' + RESET + ' All axes within thresholds.\n\n';
-  }
-  var reasons = [];
-  if ((axes.A || 0) > t.A) reasons.push('Axis A: ' + axes.A + ' > ' + t.A);
-  if ((axes.B || 0) > t.B) reasons.push('Axis B: ' + axes.B + ' > ' + t.B);
-  if ((axes.C || 0) > t.C) reasons.push('Axis C: ' + axes.C + ' > ' + t.C);
-  return '  ' + BG_RED + WHITE + BOLD + ' FAIL ' + RESET + ' ' + reasons.join(', ') + '. Exiting with code 1.\n\n';
+// Banner — exit info is now part of the main CLI output
+function renderBanner() {
+  return '';
 }
 
 module.exports = {
@@ -329,14 +661,15 @@ module.exports = {
   renderJson:         renderJson,
   exitCode:           exitCode,
   renderBanner:       renderBanner,
-  // Expose for testing
   _parseAxisFilter:   _parseAxisFilter,
   _parseThresholds:   _parseThresholds,
-  _getRoast:          _getRoast,
   _scoreColor:        _scoreColor,
   _bar:               _bar,
+  _verdictLabel:      _verdictLabel,
+  _signalLabel:       _signalLabel,
+  _commaNum:          _commaNum,
+  _renderAxisTable:   _renderAxisTable,
+  _renderExitLine:    _renderExitLine,
+  _verdictFromScore:  _verdictFromScore,
   DEFAULT_THRESHOLDS: DEFAULT_THRESHOLDS,
-  ROASTS_A:           ROASTS_A,
-  ROASTS_B:           ROASTS_B,
-  ROASTS_C:           ROASTS_C,
 };

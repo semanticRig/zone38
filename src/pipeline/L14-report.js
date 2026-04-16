@@ -35,11 +35,16 @@ function _collectSecrets(registry) {
     for (var j = 0; j < findings.length; j++) {
       var f = findings[j];
       secrets.push({
-        value:    _maskValue(f.value),
-        file:     rec.relativePath || rec.path,
-        line:     f.lineIndex,
+        value:      _maskValue(f.value),
+        file:       rec.relativePath || rec.path,
+        line:       f.lineIndex,
         confidence: f.confidence,
-        signals:  f.signalCount || 0,
+        signals:    f.signalCount || 0,
+        shape:      f.shape || 'mixed',
+        valueLength: f.valueLength || 0,
+        charFreqSignal:    f.charFreqSignal,
+        bigramSignal:      f.bigramSignal,
+        compressionSignal: f.compressionSignal,
       });
     }
   }
@@ -174,11 +179,16 @@ function _collectReview(registry) {
     for (var j = 0; j < rev.length; j++) {
       var r = rev[j];
       review.push({
-        value:    _maskValue(r.value),
-        file:     rec.relativePath || rec.path,
-        line:     r.lineIndex,
+        value:         _maskValue(r.value),
+        file:          rec.relativePath || rec.path,
+        line:          r.lineIndex,
         pipelineScore: r.pipelineScore || 0,
-        signals:  r.signalCount || 0,
+        signals:       r.signalCount || 0,
+        shape:         r.shape || 'mixed',
+        valueLength:   r.valueLength || 0,
+        charFreqSignal:    r.charFreqSignal,
+        bigramSignal:      r.bigramSignal,
+        compressionSignal: r.compressionSignal,
       });
     }
   }

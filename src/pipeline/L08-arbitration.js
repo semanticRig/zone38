@@ -24,6 +24,15 @@ var HIGH_PIPELINE   = 0.65;
 var MEDIUM_PIPELINE = 0.50;
 var UNCERTAIN_FLOOR = 0.40;
 
+function _classifyShape(value) {
+  if (!value) return 'mixed';
+  if (/^eyJ/.test(value)) return 'jwt';
+  if (/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-/.test(value)) return 'uuid';
+  if (/^[0-9a-fA-F]+$/.test(value)) return 'hex-shaped';
+  if (/^[A-Za-z0-9+/]+=*$/.test(value) && value.length > 8) return 'base64-shaped';
+  return 'mixed';
+}
+
 function _countOtherSignals(signals) {
   var count = 0;
   if (signals.icSignal)   count++;
@@ -57,6 +66,17 @@ function arbitrate(signalSets) {
       }
     }
 
+    // Extract sub-pipeline signal strengths from the top sub-result
+    var charFreqSignal = null;
+    var bigramSignal   = null;
+    var compressionSignal = null;
+    if (topSubResult && topSubResult.aggregator && topSubResult.aggregator.signals) {
+      var aggSigs = topSubResult.aggregator.signals;
+      charFreqSignal    = aggSigs.charFrequency != null ? aggSigs.charFrequency : null;
+      bigramSignal      = aggSigs.bigram != null ? aggSigs.bigram : null;
+      compressionSignal = aggSigs.compression != null ? aggSigs.compression : null;
+    }
+
     var finding = {
       value:           cand.value,
       line:            cand.line,
@@ -68,6 +88,11 @@ function arbitrate(signalSets) {
       signalCount:     others,
       signals:         signals,
       topValue:        topSubResult ? topSubResult.value : cand.value,
+      shape:           _classifyShape(cand.value),
+      valueLength:     cand.value ? cand.value.length : 0,
+      charFreqSignal:  charFreqSignal,
+      bigramSignal:    bigramSignal,
+      compressionSignal: compressionSignal,
     };
 
     if (pipeline >= HIGH_PIPELINE && others >= 2) {

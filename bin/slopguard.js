@@ -8,14 +8,7 @@ var RESET = '\x1b[0m';
 var BOLD = '\x1b[1m';
 var DIM = '\x1b[2m';
 var RED = '\x1b[31m';
-var GREEN = '\x1b[32m';
 var YELLOW = '\x1b[33m';
-var CYAN = '\x1b[36m';
-var MAGENTA = '\x1b[35m';
-var WHITE = '\x1b[37m';
-var BG_RED = '\x1b[41m';
-var BG_GREEN = '\x1b[42m';
-var BG_YELLOW = '\x1b[43m';
 
 function printHelp() {
   var lines = [
@@ -27,11 +20,13 @@ function printHelp() {
     '',
     BOLD + '  OPTIONS' + RESET,
     '    --help              Show this help message',
-    '    --verbose           Show contributing signals per finding (explains WHY)',
+    '    --verbose           Per-file detail for files above threshold (directory mode)',
+    '    --all               Per-file detail for all files (directory mode)',
+    '    --file=NAME         Per-file detail for one specific file',
     '    --json              Output results as JSON',
     '    --mcp               Scan MCP server configurations for risky patterns',
-    '    --axis=A,B,C        Limit output to specific scoring axes (v2)',
-    '    --threshold=A:N     Override exit-code threshold per axis, e.g. A:40,B:20 (v2)',
+    '    --axis=A,B,C        Limit output to specific scoring axes',
+    '    --threshold=A:N     Override exit-code threshold per axis, e.g. A:40,B:20',
     '    --v1                Use legacy v1 single-score engine',
     '',
     BOLD + '  EXAMPLES' + RESET,
@@ -59,6 +54,20 @@ var verbose = args.includes('--verbose');
 var jsonMode = args.includes('--json');
 var mcpMode = args.includes('--mcp');
 var v1Mode = args.includes('--v1');
+var allMode = args.includes('--all');
+
+// --file=NAME
+var fileArg = null;
+for (var fi2 = 0; fi2 < args.length; fi2++) {
+  if (args[fi2].indexOf('--file=') === 0) { fileArg = args[fi2].slice(7); break; }
+}
+var allMode = args.includes('--all');
+
+// --file=NAME
+var fileArg = null;
+for (var fi2 = 0; fi2 < args.length; fi2++) {
+  if (args[fi2].indexOf('--file=') === 0) { fileArg = args[fi2].slice(7); break; }
+}
 
 // --axis=A,B,C
 var axisArg = null;
@@ -99,13 +108,13 @@ if (!v1Mode) {
   } else {
     var cliOutput = L15.renderCli(report, {
       verbose: verbose,
+      all: allMode,
+      file: fileArg,
       axis: axisArg,
       targetPath: path.resolve(targetPath),
+      thresholds: thresholds,
     });
     process.stdout.write(cliOutput);
-    var axes = (report.projectSummary && report.projectSummary.axes) || { A: 0, B: 0, C: 0 };
-    var code = L15.exitCode(axes, thresholds);
-    process.stdout.write(L15.renderBanner(code, axes, thresholds));
   }
 
   var v2Axes = (report.projectSummary && report.projectSummary.axes) || { A: 0, B: 0, C: 0 };

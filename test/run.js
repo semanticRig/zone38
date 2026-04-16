@@ -1527,10 +1527,8 @@ assert(L15.exitCode({ A: 40, B: 20, C: 50 }) === 0, 'L15 exitCode: all within de
 assert(L15.exitCode({ A: 40, B: 20, C: 50 }, { A: 30, B: 10, C: 40 }) === 1, 'L15 exitCode: custom thresholds → 1');
 assert(L15.exitCode({ A: 10, B: 5, C: 10 }, { A: 30, B: 10, C: 40 }) === 0, 'L15 exitCode: custom thresholds → 0');
 
-// --- Roast lookup ---
-assert(typeof L15._getRoast(5, L15.ROASTS_A) === 'string', 'L15 getRoast: returns a string');
-assert(L15._getRoast(80, L15.ROASTS_A).length > 0, 'L15 getRoast: high score returns non-empty');
-assert(L15._getRoast(0, L15.ROASTS_B).length > 0, 'L15 getRoast: zero score returns non-empty');
+// --- Roast lookup (removed in v2 redesign) ---
+// Roasts no longer exist; replaced with clean instrument-panel output
 
 // --- renderJson ---
 var l15TestReport = { projectSummary: { axes: { A: 10, B: 5, C: 3 } }, secrets: [], patternHits: [] };
@@ -1568,29 +1566,28 @@ var l15CliReport = {
   cleanFiles: [{ file: 'src/b.js', axes: { A: 0, B: 0, C: 0 } }],
 };
 
-var l15CliOutput = L15.renderCli(l15CliReport, { verbose: true, targetPath: '/tmp/project' });
+var l15CliOutput = L15.renderCli(l15CliReport, { verbose: true, targetPath: '/tmp/project', thresholds: L15.DEFAULT_THRESHOLDS });
 assert(typeof l15CliOutput === 'string', 'L15 renderCli: returns string');
-assert(l15CliOutput.indexOf('Axis A') !== -1, 'L15 renderCli: contains Axis A');
-assert(l15CliOutput.indexOf('Axis B') !== -1, 'L15 renderCli: contains Axis B');
-assert(l15CliOutput.indexOf('Axis C') !== -1, 'L15 renderCli: contains Axis C');
+assert(l15CliOutput.indexOf('AI SLOP') !== -1, 'L15 renderCli: contains AI SLOP axis');
+assert(l15CliOutput.indexOf('SECURITY') !== -1, 'L15 renderCli: contains SECURITY axis');
+assert(l15CliOutput.indexOf('QUALITY') !== -1, 'L15 renderCli: contains QUALITY axis');
 assert(l15CliOutput.indexOf('src/a.js') !== -1, 'L15 renderCli: contains file path');
-assert(l15CliOutput.indexOf('Secrets detected') !== -1, 'L15 renderCli: contains secrets section');
-assert(l15CliOutput.indexOf('Exposure risks') !== -1, 'L15 renderCli: contains exposure section');
-assert(l15CliOutput.indexOf('Pattern hits') !== -1, 'L15 renderCli: contains pattern hits (verbose)');
-assert(l15CliOutput.indexOf('Slop breakdown') !== -1, 'L15 renderCli: contains slop breakdown (verbose)');
-assert(l15CliOutput.indexOf('Review bucket') !== -1, 'L15 renderCli: contains review section');
+assert(l15CliOutput.indexOf('SECRETS') !== -1, 'L15 renderCli: contains secrets section');
+assert(l15CliOutput.indexOf('EXPOSURE') !== -1, 'L15 renderCli: contains exposure section');
+assert(l15CliOutput.indexOf('PATTERN HITS') !== -1, 'L15 renderCli: contains pattern hits (verbose)');
+assert(l15CliOutput.indexOf('SLOP BREAKDOWN') !== -1, 'L15 renderCli: contains slop breakdown (verbose)');
+assert(l15CliOutput.indexOf('REVIEW') !== -1, 'L15 renderCli: contains review section');
 
 // --- renderCli with axis filter ---
-var l15FilteredOutput = L15.renderCli(l15CliReport, { axis: 'B' });
-assert(l15FilteredOutput.indexOf('Axis B') !== -1, 'L15 renderCli filtered: contains Axis B');
-assert(l15FilteredOutput.indexOf('Axis A') === -1, 'L15 renderCli filtered: excludes Axis A');
+var l15FilteredOutput = L15.renderCli(l15CliReport, { axis: 'B', thresholds: L15.DEFAULT_THRESHOLDS });
+assert(l15FilteredOutput.indexOf('SECURITY') !== -1, 'L15 renderCli filtered: contains SECURITY');
+assert(l15FilteredOutput.indexOf('AI SLOP') === -1, 'L15 renderCli filtered: excludes AI SLOP');
 
-// --- renderBanner ---
+// --- renderBanner (now returns empty — exit info is inline) ---
 var l15PassBanner = L15.renderBanner(0, { A: 10, B: 5, C: 3 }, L15.DEFAULT_THRESHOLDS);
-assert(l15PassBanner.indexOf('PASS') !== -1, 'L15 renderBanner: pass shows PASS');
+assert(l15PassBanner === '', 'L15 renderBanner: returns empty string');
 var l15FailBanner = L15.renderBanner(1, { A: 60, B: 30, C: 5 }, L15.DEFAULT_THRESHOLDS);
-assert(l15FailBanner.indexOf('FAIL') !== -1, 'L15 renderBanner: fail shows FAIL');
-assert(l15FailBanner.indexOf('Axis A') !== -1, 'L15 renderBanner: fail shows reason');
+assert(l15FailBanner === '', 'L15 renderBanner: fail also returns empty string');
 
 // --- Pipeline Runner integration ---
 section('Pipeline Runner');

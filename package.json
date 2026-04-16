@@ -26,7 +26,8 @@
     "corpus/",
     "templates/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "PHASES.md"
   ],
   "engines": {
     "node": ">=16.0.0"

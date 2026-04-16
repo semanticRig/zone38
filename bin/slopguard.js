@@ -26,15 +26,18 @@ function printHelp() {
     '    slopguard <path> [options]',
     '',
     BOLD + '  OPTIONS' + RESET,
-    '    --help       Show this help message',
-    '    --verbose    Show detailed per-file hit breakdown',
-    '    --json       Output results as JSON',
-    '    --mcp        Scan MCP server configurations for risky patterns',
+    '    --help              Show this help message',
+    '    --verbose           Show contributing signals per finding (explains WHY)',
+    '    --json              Output results as JSON',
+    '    --mcp               Scan MCP server configurations for risky patterns',
+    '    --axis=A,B,C        Limit output to specific scoring axes (v2)',
+    '    --threshold=A:N     Override exit-code threshold per axis, e.g. A:40,B:20 (v2)',
     '',
     BOLD + '  EXAMPLES' + RESET,
     '    slopguard .',
     '    slopguard ./src --verbose',
     '    slopguard ./src --mcp --json',
+    '    slopguard . --axis=A,B --threshold=A:40,B:20',
     '',
   ];
   process.stdout.write(lines.join('\n') + '\n');
@@ -52,6 +55,20 @@ var scorer = require('../src/scorer');
 var verbose = args.includes('--verbose');
 var jsonMode = args.includes('--json');
 var mcpMode = args.includes('--mcp');
+
+// --axis=A,B,C  (v2 — parsed but not yet consumed by v0.0.1 output path)
+var axisArg = null;
+for (var ai = 0; ai < args.length; ai++) {
+  if (args[ai].indexOf('--axis=') === 0) { axisArg = args[ai].slice(7); break; }
+}
+
+// --threshold=A:N,B:N,C:N  (v2 — parsed but not yet consumed by v0.0.1 output path)
+var thresholdArg = null;
+for (var ti = 0; ti < args.length; ti++) {
+  if (args[ti].indexOf('--threshold=') === 0) { thresholdArg = args[ti].slice(12); break; }
+}
+
+void axisArg; void thresholdArg; // will be consumed when v2 output layer is implemented
 
 // Find the target path (first non-flag argument)
 var targetPath = null;

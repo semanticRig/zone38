@@ -776,12 +776,162 @@ assert(typeof l03Standalone.selfRatio === 'number', 'standalone analyseFile retu
 var l03RepResult = L03.analyseFile(null, l03RepContent);
 assert(l03RepResult.compressionScore >= l03Result.compressionScore, 'repetitive.js compression score >= clean.js (' + l03RepResult.compressionScore + ' >= ' + l03Result.compressionScore + ')');
 
+// ============================================================
+// src/string/ pipeline (Phase 6)
+// ============================================================
+
+section('String pipeline — decomposer');
+
+var strDecomp = require('../src/string/decomposer.js');
+
+// Semicolon KV strategy
+var sdMx = strDecomp.decompose('sketch=0;rounded=1;arcSize=50;fillColor=#3aa7ff;strokeColor=#ddd');
+assert(sdMx.decomposed === true, 'str-decompose: mxGraph style decomposes');
+assert(sdMx.values.indexOf('#3aa7ff') !== -1, 'str-decompose: hex color value extracted');
+
+// Compound with embedded secret
+var sdComp = strDecomp.decompose('user=admin;password=Xk7mR9qL2;host=db.prod.internal');
+assert(sdComp.decomposed === true, 'str-decompose: compound kv decomposes');
+assert(sdComp.values.indexOf('Xk7mR9qL2') !== -1, 'str-decompose: embedded password extracted');
+
+// URL query params
+var sdUrl = strDecomp.decompose('https://api.example.com/v1?user=bob&token=abc123&format=json');
+assert(sdUrl.decomposed === true, 'str-decompose: URL query params decompose');
+assert(sdUrl.values.indexOf('abc123') !== -1, 'str-decompose: token value extracted');
+
+// JSON fragment
+var sdJson = strDecomp.decompose('{"name": "Alice", "role": "admin"}');
+assert(sdJson.decomposed === true, 'str-decompose: JSON fragment decomposes');
+assert(sdJson.values.indexOf('Alice') !== -1, 'str-decompose: JSON value Alice extracted');
+
+// Plain API key passes through unchanged
+var sdPlain = strDecomp.decompose('sk_live_abc123def456ghi789jkl012mno345');
+assert(sdPlain.decomposed === false, 'str-decompose: plain API key not decomposed');
+assert(sdPlain.values[0] === 'sk_live_abc123def456ghi789jkl012mno345', 'str-decompose: plain key value preserved');
+
+// Null/empty input
+assert(strDecomp.decompose('').decomposed === false, 'str-decompose: empty string → not decomposed');
+
+section('String pipeline — char-frequency');
+
+var strCF = require('../src/string/char-frequency.js');
+
+// API key → high signal
+var scfApi = strCF.analyse('sk_live_abc123def456ghi789jkl012mno345');
+assert(scfApi.signal > 0.4, 'str-cf: API key signal > 0.4 (got ' + scfApi.signal.toFixed(3) + ')');
+assert(scfApi.entropy > 3.0, 'str-cf: API key entropy > 3.0 (got ' + scfApi.entropy.toFixed(3) + ')');
+
+// English-like → low signal
+var scfEng = strCF.analyse('this is a normal variable name for testing');
+assert(scfEng.signal < 0.5, 'str-cf: English-like signal < 0.5 (got ' + scfEng.signal.toFixed(3) + ')');
+
+// Output shape
+assert(typeof scfApi.distanceFromCode   === 'number', 'str-cf: result has distanceFromCode');
+assert(typeof scfApi.distanceFromSecret === 'number', 'str-cf: result has distanceFromSecret');
+
+// Edge: short string
+var scfShort = strCF.analyse('a');
+assert(scfShort.signal === 0.5, 'str-cf: single char returns neutral signal 0.5');
+
+section('String pipeline — bigram');
+
+var strBg = require('../src/string/bigram.js');
+
+// Random token → high signal
+var sbgRand = strBg.analyse('Xk7mR9qL2wF5nT3vBj8');
+assert(sbgRand.signal > 0.5, 'str-bg: random token bigram signal > 0.5 (got ' + sbgRand.signal.toFixed(3) + ')');
+assert(typeof sbgRand.bigramEntropy === 'number', 'str-bg: has bigramEntropy');
+assert(typeof sbgRand.charEntropy   === 'number', 'str-bg: has charEntropy');
+assert(typeof sbgRand.ratio         === 'number', 'str-bg: has ratio');
+
+// Structured string → low signal
+var sbgStruct = strBg.analyse('aaabbbcccdddeeefffggg');
+assert(sbgStruct.signal < 0.5, 'str-bg: structured string bigram signal < 0.5 (got ' + sbgStruct.signal.toFixed(3) + ')');
+
+// Short string → neutral
+assert(strBg.analyse('abc').signal === 0.5, 'str-bg: short string → neutral 0.5');
+
+section('String pipeline — compression');
+
+var strComp = require('../src/string/compression.js');
+
+// Short string: null
+assert(strComp.analyse('short') === null, 'str-comp: <=50 chars returns null');
+
+// Long repetitive: low signal
+var scRepeat = '';
+for (var scri = 0; scri < 10; scri++) scRepeat += 'function getData() { return data; } ';
+var scRepResult = strComp.analyse(scRepeat);
+assert(scRepResult !== null, 'str-comp: long repetitive returns non-null');
+assert(scRepResult.signal < 0.5, 'str-comp: repetitive string signal < 0.5 (got ' + scRepResult.signal.toFixed(3) + ')');
+assert(typeof scRepResult.ratio === 'number', 'str-comp: result has ratio');
+
+section('String pipeline — aggregator');
+
+var strAgg = require('../src/string/aggregator.js');
+
+// Known API key → ambiguous (mixed signals) or secret
+var saggApi = strAgg.aggregate('sk_live_abc123def456ghi789jkl012mno345');
+assert(typeof saggApi.score     === 'number',  'str-agg: API key has numeric score');
+assert(typeof saggApi.decided   === 'boolean', 'str-agg: API key has decided boolean');
+assert(typeof saggApi.ambiguous === 'boolean', 'str-agg: API key has ambiguous boolean');
+assert(typeof saggApi.signals   === 'object',  'str-agg: result has signals object');
+assert(saggApi.decided !== saggApi.ambiguous,  'str-agg: decided and ambiguous are mutually exclusive');
+
+// English text → decided safe
+var saggEng = strAgg.aggregate('this is a normal english sentence for testing purposes longer text');
+assert(saggEng.score < 50, 'str-agg: English text score < 50 (got ' + saggEng.score + ')');
+
+section('String pipeline — vector engine');
+
+var strVec = require('../src/string/vector.js');
+
+// Real API key → isSecret=true or score >= 0.5
+var svApi = strVec.score('sk_live_abc123def456ghi789jkl012mno345');
+assert(svApi.score >= 0.5, 'str-vec: API key score >= 0.5 (got ' + svApi.score.toFixed(3) + ')');
+assert(svApi.isSecret === true, 'str-vec: API key isSecret=true');
+assert(Array.isArray(svApi.dimensions) && svApi.dimensions.length === 6, 'str-vec: result has 6 dimensions');
+
+// English text → isSecret=false
+var svEng = strVec.score('this is a normal english sentence for testing purposes and more text');
+assert(svEng.isSecret === false, 'str-vec: English text isSecret=false');
+assert(svEng.score < 0.5, 'str-vec: English text score < 0.5 (got ' + svEng.score.toFixed(3) + ')');
+
+// Threshold constant exposed
+assert(strVec.THRESHOLD === 0.50, 'str-vec: THRESHOLD is 0.50');
+
+// Empty string
+var svEmpty = strVec.score('');
+assert(svEmpty.score === 0, 'str-vec: empty string score is 0');
+
+section('String pipeline — vector worker');
+
+var strWorker = require('../src/string/vector-worker.js');
+
+var swBatch = [
+  { index: 0, value: 'sk_live_abc123def456ghi789jkl012mno345' },
+  { index: 1, value: 'this is normal english text for testing' },
+];
+
+strWorker.runBatch(swBatch).then(function (swResults) {
+  assert(swResults.length === 2, 'str-worker: batch returns 2 results');
+  assert(swResults[0].score >= 0.5, 'str-worker: API key score >= 0.5 (got ' + swResults[0].score.toFixed(3) + ')');
+  assert(swResults[1].score < 0.5,  'str-worker: English text score < 0.5 (got ' + swResults[1].score.toFixed(3) + ')');
+  assert(swResults[0].index === 0,  'str-worker: result preserves index');
+
+  // Empty batch
+  return strWorker.runBatch([]);
+}).then(function (swEmpty) {
+  assert(swEmpty.length === 0, 'str-worker: empty batch returns empty array');
+}).catch(function (err) {
+  process.stderr.write('String worker test error: ' + err.message + '\n');
+  process.exit(1);
+});
+
 // --- L04 Entity Harvesting ---
 section('L04 Entity Harvesting');
 
 var L04 = require('../src/pipeline/L04-harvest.js');
-
-// String extraction: basic single and double quoted
 var l04Line1 = "var DB_HOST = 'db.prod.internal';";
 var l04Strings1 = L04._extractStringsFromLine(l04Line1, 0);
 assert(l04Strings1.length >= 1, 'extractStringsFromLine finds single-quoted string');

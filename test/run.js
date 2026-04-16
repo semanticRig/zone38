@@ -1038,6 +1038,155 @@ var l05BlobCands = [
 var l05BlobResult = L05.preflight(l05BlobCands, null);
 assert(l05BlobResult.length === 1 && l05BlobResult[0].priority === 'blob', 'preflight classifies oversized values as blob');
 
+// --- L06 Herd Discrimination ---
+section('L06 — Herd discrimination');
+
+var L06 = require('../src/pipeline/L06-herd.js');
+
+// Helper: build minimal candidate object
+function makeCand(value, lineIndex, identifierName) {
+  return { value: value, line: 'x', col: 0, lineIndex: lineIndex,
+           identifierName: identifierName || null, callSiteContext: null,
+           type: 'string', priority: 'normal' };
+}
+
+// Uniform hex hashes (herd): similar entropy → low variance → IHD < 1.5 → discarded
+var l06HexHerd = [
+  makeCand('a1b2c3d4e5f6a1b2', 0),
+  makeCand('b2c3d4e5f6a1b2c3', 1),
+  makeCand('c3d4e5f6a1b2c3d4', 2),
+  makeCand('d4e5f6a1b2c3d4e5', 3),
+];
+var l06HerdResult = L06.discriminate(l06HexHerd);
+assert(l06HerdResult.length === 0, 'L06: uniform hex herd discarded (IHD below threshold)');
+
+// Small group (< MIN_HERD_SIZE=3): always escalated
+var l06Small = [makeCand('sk_live_abc123def456', 0), makeCand('ghp_realtoken789xyz', 5)];
+var l06SmallResult = L06.discriminate(l06Small);
+assert(l06SmallResult.length === 2, 'L06: small group (< min herd size) always escalated');
+
+// Isolated candidate: always escalated
+var l06Single = [makeCand('sk_live_abc123def456ghi789', 0)];
+assert(L06.discriminate(l06Single).length === 1, 'L06: single isolated candidate escalated');
+
+// _cluster: same identifierName groups candidates regardless of line distance
+var l06SameIdent = [
+  makeCand('valA', 0, 'DB_PASS'),
+  makeCand('valB', 100, 'DB_PASS'),
+];
+var l06Clusters = L06._cluster(l06SameIdent);
+assert(l06Clusters.length === 1, 'L06: same identifierName clusters even with large line gap');
+
+// _variance: uniform array has 0 variance
+var l06Vars = L06._variance([3, 3, 3, 3], L06._mean([3, 3, 3, 3]));
+assert(l06Vars === 0, 'L06: _variance of uniform array is 0');
+
+// --- L07 Deep Analysis ---
+section('L07 — Deep analysis');
+
+var L07 = require('../src/pipeline/L07-deep.js');
+
+// Index of Coincidence: English-like text ≈ 0.065
+var l07IcEnglish = L07._indexOfCoincidence('abcdeabcdeabcdeabcde');
+assert(l07IcEnglish > 0.05, 'L07: IC of repeated pattern > 0.05 (got ' + l07IcEnglish.toFixed(4) + ')');
+
+// IC of truly random-looking token is low
+var l07IcRandom = L07._indexOfCoincidence('Xk7mR9qL2wF5nT3vBj8YpAs');
+assert(l07IcRandom < 0.10, 'L07: IC of random token < 0.10 (got ' + l07IcRandom.toFixed(4) + ')');
+
+// Class transition friction: mixed chars → high
+var l07CtfHigh = L07._classTransitionFriction('aB1!cD2#eF');
+assert(l07CtfHigh > 0.4, 'L07: mixed-class string CTF > 0.4 (got ' + l07CtfHigh.toFixed(3) + ')');
+
+// CTF: pure lowercase → 0
+var l07CtfLow = L07._classTransitionFriction('abcdefghijk');
+assert(l07CtfLow === 0, 'L07: pure lowercase CTF = 0');
+
+// Entropy gradient: 3 segments returned
+var l07Egs = L07._entropyGradient('abcdefghijklmnopqrstuvwxyz');
+assert(l07Egs.length === 3, 'L07: entropyGradient returns 3 segments');
+assert(typeof l07Egs[0] === 'number', 'L07: gradient segment is a number');
+
+// Short string → [0,0,0]
+var l07EgsShort = L07._entropyGradient('abc');
+assert(l07EgsShort[0] === 0, 'L07: short string gradient is [0,0,0]');
+
+// Uniformity filter: perfectly uniform distribution of many chars → true
+var l07UniTrue = 'abcdefghijklmnopqrstuvwxyz01'; // 28 unique in 28 chars
+assert(L07._uniformitySignal(l07UniTrue) === true, 'L07: uniform dist string → uniformity=true');
+
+// Short string → not uniform
+assert(L07._uniformitySignal('abc') === false, 'L07: short string → uniformity=false');
+
+// deepAnalysis: returns signal set per candidate
+var l07Cands = [makeCand('sk_live_abc123def456ghi789jkl012mno345', 0)];
+var l07Results = L07.deepAnalysis(l07Cands);
+assert(l07Results.length === 1, 'L07: deepAnalysis returns one result per candidate');
+assert(typeof l07Results[0].signals === 'object', 'L07: result has signals object');
+assert(typeof l07Results[0].signals.maxPipelineScore === 'number', 'L07: signals has maxPipelineScore');
+assert(typeof l07Results[0].signals.ic              === 'number', 'L07: signals has ic');
+assert(typeof l07Results[0].signals.ctf             === 'number', 'L07: signals has ctf');
+assert(Array.isArray(l07Results[0].signals.egs),                  'L07: signals has egs array');
+
+// deepAnalysis: empty input
+assert(L07.deepAnalysis([]).length === 0, 'L07: empty input returns empty array');
+
+// --- L08 Arbitration ---
+section('L08 — Confidence arbitration');
+
+var L08 = require('../src/pipeline/L08-arbitration.js');
+
+// Helper: build a signal set for testing
+function makeSignalSet(pipelineScore, icSignal, ctfSignal, egsSpike, uniformity) {
+  return {
+    candidate: makeCand('test-value-abc-def-ghi', 0),
+    subResults: [{ value: 'test-value-abc-def-ghi', resolvedScore: pipelineScore }],
+    signals: {
+      maxPipelineScore: pipelineScore,
+      ic: 0.04, icSignal: icSignal ? 1 : 0,
+      ctf: 0.5, ctfSignal: ctfSignal ? 1 : 0,
+      egs: [3, 3, 3], egsSpike: egsSpike || false,
+      uniformity: uniformity || false,
+    },
+  };
+}
+
+// HIGH: pipeline >= 0.65 AND >= 2 other signals
+var l08High = L08.arbitrate([makeSignalSet(0.70, true, true, false, false)]);
+assert(l08High.findings.length === 1, 'L08: HIGH confidence → goes to findings');
+assert(l08High.findings[0].confidence === 'HIGH', 'L08: confidence tier is HIGH');
+assert(l08High.review.length === 0, 'L08: HIGH has no review items');
+
+// MEDIUM: pipeline >= 0.50 AND exactly 1 other signal
+var l08Med = L08.arbitrate([makeSignalSet(0.55, true, false, false, false)]);
+assert(l08Med.findings.length === 1, 'L08: MEDIUM confidence → goes to findings');
+assert(l08Med.findings[0].confidence === 'MEDIUM', 'L08: confidence tier is MEDIUM');
+
+// UNCERTAIN: pipeline >= 0.40 but no other signals
+var l08Uncertain = L08.arbitrate([makeSignalSet(0.42, false, false, false, false)]);
+assert(l08Uncertain.review.length === 1, 'L08: UNCERTAIN → goes to review (not findings)');
+assert(l08Uncertain.findings.length === 0, 'L08: UNCERTAIN has no findings');
+assert(l08Uncertain.review[0].confidence === 'UNCERTAIN', 'L08: confidence is UNCERTAIN');
+
+// SAFE: pipeline < 0.40 and no signals → discarded
+var l08Safe = L08.arbitrate([makeSignalSet(0.20, false, false, false, false)]);
+assert(l08Safe.findings.length === 0, 'L08: SAFE discarded from findings');
+assert(l08Safe.review.length === 0,   'L08: SAFE discarded from review');
+
+// Empty input
+var l08Empty = L08.arbitrate([]);
+assert(l08Empty.findings.length === 0 && l08Empty.review.length === 0, 'L08: empty input returns empty output');
+
+// Finding shape check
+assert(typeof l08High.findings[0].value           === 'string', 'L08: finding has value');
+assert(typeof l08High.findings[0].pipelineScore   === 'number', 'L08: finding has pipelineScore');
+assert(typeof l08High.findings[0].signalCount      === 'number', 'L08: finding has signalCount');
+
+// Threshold constants exposed
+assert(L08.HIGH_PIPELINE   === 0.65, 'L08: HIGH_PIPELINE threshold is 0.65');
+assert(L08.MEDIUM_PIPELINE === 0.50, 'L08: MEDIUM_PIPELINE threshold is 0.50');
+assert(L08.UNCERTAIN_FLOOR === 0.40, 'L08: UNCERTAIN_FLOOR is 0.40');
+
 // --- Vector worker ---
 section('Vector worker (batch)');
 

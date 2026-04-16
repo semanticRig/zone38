@@ -1,6 +1,6 @@
 {
   "name": "slopguard",
-  "version": "0.0.1",
+  "version": "2.0.0",
   "description": "Detects AI slop in your codebase before your tech lead does.",
   "main": "src/index.js",
   "bin": {
@@ -26,7 +26,8 @@
     "corpus/",
     "templates/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "PHASES.md"
   ],
   "engines": {
     "node": ">=16.0.0"

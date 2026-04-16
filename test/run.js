@@ -1060,6 +1060,116 @@ var l05BlobCands = [
 var l05BlobResult = L05.preflight(l05BlobCands, null);
 assert(l05BlobResult.length === 1 && l05BlobResult[0].priority === 'blob', 'preflight classifies oversized values as blob');
 
+// --- L12 Project-Level Calibration ---
+section('L12 — Project-level calibration');
+
+var L12 = require('../src/pipeline/L12-calibration.js');
+
+// --- Statistical helpers ---
+assert(L12._median([1, 2, 3, 4, 5]) === 3, 'L12 _median: odd-length array');
+assert(L12._median([1, 2, 3, 4]) === 2.5, 'L12 _median: even-length array');
+assert(L12._median([]) === 0, 'L12 _median: empty array → 0');
+assert(L12._mad([1, 1, 2, 2, 4, 6, 9], 2) === 1, 'L12 _mad: known dataset');
+assert(L12._mad([], 0) === 0, 'L12 _mad: empty → 0');
+
+// --- Bayesian self-calibration weight ---
+assert(L12._selfCalibrationWeight(5) === 0, 'L12 selfWeight: 5 files → 0 (trust global)');
+assert(L12._selfCalibrationWeight(10) === 0, 'L12 selfWeight: 10 files → 0');
+assert(L12._selfCalibrationWeight(100) === 1, 'L12 selfWeight: 100 files → 1 (full self-calibrate)');
+assert(L12._selfCalibrationWeight(200) === 1, 'L12 selfWeight: 200 files → 1');
+var l12Mid = L12._selfCalibrationWeight(55);
+assert(l12Mid > 0 && l12Mid < 1, 'L12 selfWeight: 55 files → between 0 and 1 (got ' + l12Mid.toFixed(2) + ')');
+
+// --- Empty registry ---
+var l12Empty = L12.calibrate([]);
+assert(l12Empty.entropyMAD === 0, 'L12 empty: entropyMAD is 0');
+assert(l12Empty.compressionBaseline === 0, 'L12 empty: compressionBaseline is 0');
+assert(Object.keys(l12Empty.confidenceMultipliers).length === 0, 'L12 empty: no multipliers');
+
+// --- Confidence multipliers: dense category → downweighted ---
+var l12MultReg = [];
+for (var l12i = 0; l12i < 10; l12i++) {
+  l12MultReg.push({
+    findings: [], compression: {},
+    patternHits: [{ category: 'verbosity' }],
+  });
+}
+var l12MultResult = L12.calibrate(l12MultReg);
+assert(l12MultResult.confidenceMultipliers.verbosity !== undefined, 'L12 multipliers: verbosity key exists');
+assert(l12MultResult.confidenceMultipliers.verbosity < 1, 'L12 multipliers: verbosity hits all files → downweighted (got ' + l12MultResult.confidenceMultipliers.verbosity + ')');
+
+// --- Multipliers: rare category → full weight ---
+var l12RareReg = [];
+for (var l12j = 0; l12j < 10; l12j++) {
+  l12RareReg.push({ findings: [], compression: {}, patternHits: l12j === 0 ? [{ category: 'security' }] : [] });
+}
+var l12RareResult = L12.calibrate(l12RareReg);
+assert(l12RareResult.confidenceMultipliers.security === 1, 'L12 multipliers: security hits 1/10 files → full weight');
+
+// --- Calibration mutates findings: large project with uniform scores → downgrade ---
+// Build 100+ file registry where all findings have pipelineScore = 0.55
+var l12BigReg = [];
+for (var l12k = 0; l12k < 110; l12k++) {
+  l12BigReg.push({
+    findings: [{ value: 'test', pipelineScore: 0.55, confidence: 'MEDIUM', lineIndex: 0 }],
+    compression: { selfRatio: 0.30 },
+    patternHits: [],
+  });
+}
+var l12BigResult = L12.calibrate(l12BigReg);
+assert(l12BigResult.selfCalibrationWeight === 1, 'L12 big project: selfWeight = 1');
+assert(l12BigResult.entropyMedian === 0.55, 'L12 big project: entropyMedian = 0.55');
+// All findings are within 1 MAD of median (MAD=0 since all identical),
+// so they should all be downgraded from MEDIUM → UNCERTAIN
+var l12Downgraded = l12BigReg.filter(function (e) {
+  return e.findings[0].confidence === 'UNCERTAIN';
+});
+assert(l12Downgraded.length === 110, 'L12 big project: all uniform MEDIUM findings downgraded to UNCERTAIN');
+
+// --- Small project: no recalibration of findings ---
+var l12SmallReg = [];
+for (var l12s = 0; l12s < 5; l12s++) {
+  l12SmallReg.push({
+    findings: [{ value: 'test', pipelineScore: 0.55, confidence: 'MEDIUM', lineIndex: 0 }],
+    compression: { selfRatio: 0.30 },
+    patternHits: [],
+  });
+}
+L12.calibrate(l12SmallReg);
+var l12NotDowngraded = l12SmallReg.filter(function (e) {
+  return e.findings[0].confidence === 'MEDIUM';
+});
+assert(l12NotDowngraded.length === 5, 'L12 small project: findings NOT downgraded (selfWeight = 0)');
+
+// --- Compression recalibration: within-range files get outlierScore zeroed ---
+var l12CompReg = [];
+for (var l12c = 0; l12c < 50; l12c++) {
+  l12CompReg.push({
+    findings: [],
+    compression: { selfRatio: 0.30, projectOutlierScore: 25 },
+    patternHits: [],
+  });
+}
+// Add one outlier
+l12CompReg.push({
+  findings: [],
+  compression: { selfRatio: 0.05, projectOutlierScore: 80 },
+  patternHits: [],
+});
+L12.calibrate(l12CompReg);
+// The first 50 (uniform) should have outlierScore zeroed
+assert(l12CompReg[0].compression.projectOutlierScore === 0, 'L12 compression: within-range file gets outlierScore zeroed');
+// The outlier (0.05) should keep its score
+assert(l12CompReg[50].compression.projectOutlierScore === 80, 'L12 compression: outlier file keeps its outlierScore');
+
+// --- Output shape ---
+assert(typeof l12BigResult.entropyMAD === 'number', 'L12 output: has entropyMAD');
+assert(typeof l12BigResult.entropyMedian === 'number', 'L12 output: has entropyMedian');
+assert(typeof l12BigResult.compressionBaseline === 'number', 'L12 output: has compressionBaseline');
+assert(typeof l12BigResult.compressionMAD === 'number', 'L12 output: has compressionMAD');
+assert(typeof l12BigResult.selfCalibrationWeight === 'number', 'L12 output: has selfCalibrationWeight');
+assert(typeof l12BigResult.confidenceMultipliers === 'object', 'L12 output: has confidenceMultipliers');
+
 // --- L11 Cross-File Correlation ---
 section('L11 — Cross-file correlation');
 

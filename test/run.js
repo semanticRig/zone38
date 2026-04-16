@@ -115,7 +115,29 @@ section('Rule detection — clean.js');
 var cleanResult = scanner.scanFile(path.join(fixturesDir, 'clean.js'), fixturesDir);
 assert(cleanResult.hits.length === 0, 'clean.js triggers zero hits (got ' + cleanResult.hits.length + ')');
 
-// --- Rule detection: context confusion ---
+// --- Rule unit tests: false-positive guards ---
+section('Rule unit tests — false-positive guards');
+
+var rulesModule = require('../src/rules.js');
+var ternaryRule = rulesModule.find(function (r) { return r.id === 'excessive-ternary-nesting'; });
+
+// Actual nested ternary → must fire
+var realTernary = "var x = a > 0 ? a > 10 ? a > 100 ? 'big' : 'med' : 'small' : 'neg';";
+assert(ternaryRule.test(realTernary), 'excessive-ternary: fires on real nested ternary');
+
+// Regex with ? quantifiers → must NOT fire (the reported false positive)
+var regexLine = "const match = trimmed.match(/\\d+(?:\\.\\d+)+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?/);";
+assert(!ternaryRule.test(regexLine), 'excessive-ternary: does NOT fire on regex with ? quantifiers');
+
+// String literal containing ? → must NOT fire
+var strLine = "var help = 'Is this ok? Maybe? Yes?';";
+assert(!ternaryRule.test(strLine), 'excessive-ternary: does NOT fire on ? inside string literal');
+
+// Optional chaining — should not be counted as ternary
+var chainLine = "var v = foo?.bar?.baz?.qux;";
+assert(!ternaryRule.test(chainLine), 'excessive-ternary: does NOT fire on optional chaining');
+
+
 section('Rule detection — server/confused.js');
 
 var confusedResult = scanner.scanFile(path.join(fixturesDir, 'server', 'confused.js'), fixturesDir);

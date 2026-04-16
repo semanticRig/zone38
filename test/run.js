@@ -1170,6 +1170,284 @@ assert(typeof l12BigResult.compressionMAD === 'number', 'L12 output: has compres
 assert(typeof l12BigResult.selfCalibrationWeight === 'number', 'L12 output: has selfCalibrationWeight');
 assert(typeof l12BigResult.confidenceMultipliers === 'object', 'L12 output: has confidenceMultipliers');
 
+// --- L13 Scoring Engine ---
+section('L13 — Three-axis scoring');
+
+var L13 = require('../src/pipeline/L13-scoring.js');
+
+// --- Clamp ---
+assert(L13._clamp(-5) === 0, 'L13 _clamp: negative → 0');
+assert(L13._clamp(150) === 100, 'L13 _clamp: >100 → 100');
+assert(L13._clamp(42.456) === 42.5, 'L13 _clamp: rounds to 1 decimal');
+
+// --- Role weight ---
+assert(L13._roleWeight({ territory: 'vendor' }) === 0.1, 'L13 roleWeight: vendor → 0.1');
+assert(L13._roleWeight({ territory: 'test' }) === 0.5, 'L13 roleWeight: test → 0.5');
+assert(L13._roleWeight({ territory: 'application' }) === 1.0, 'L13 roleWeight: application → 1.0');
+assert(L13._roleWeight({}) === 1.0, 'L13 roleWeight: missing → 1.0');
+
+// --- Empty registry ---
+var l13Empty = L13.computeAxes([]);
+assert(l13Empty.axes.A === 0 && l13Empty.axes.B === 0 && l13Empty.axes.C === 0, 'L13 empty: all axes 0');
+assert(l13Empty.perFile.length === 0, 'L13 empty: no per-file');
+assert(l13Empty.project.fileCount === 0, 'L13 empty: project fileCount 0');
+
+// --- Pattern hits contribute to Axis A ---
+var l13SlopReg = [{
+  relativePath: 'src/sloppy.js',
+  path: '/tmp/src/sloppy.js',
+  size: 500,
+  territory: 'application',
+  surface: { avgLineLength: 50 },
+  compression: { compressionScore: 0, selfRatio: 0.4 },
+  findings: [],
+  review: [],
+  urlFindings: [],
+  patternHits: [
+    { ruleId: 'scaffold-todo', ruleName: 'Scaffold TODO', category: 'scaffold-residue', severity: 7, line: '// TODO: implement', lineIndex: 0, fix: 'Remove scaffold TODOs' },
+    { ruleId: 'clone-dup', ruleName: 'Clone dup', category: 'clone-pollution', severity: 8, line: 'function handleSubmit()', lineIndex: 5, fix: 'Remove duplicate' },
+    { ruleId: 'verbose-null', ruleName: 'Verbose null', category: 'verbosity', severity: 3, line: 'if (x !== null)', lineIndex: 10, fix: 'Simplify' },
+  ],
+}];
+var l13SlopResult = L13.computeAxes(l13SlopReg);
+assert(l13SlopResult.axes.A > 0, 'L13 slop patterns: Axis A > 0 (got ' + l13SlopResult.axes.A + ')');
+assert(l13SlopResult.perFile.length === 1, 'L13 slop patterns: 1 per-file entry');
+assert(l13SlopResult.perFile[0].axes.A > 0, 'L13 slop patterns: per-file Axis A > 0');
+assert(l13SlopResult.perFile[0].breakdown.A.patterns > 0, 'L13 slop patterns: breakdown shows pattern contribution');
+
+// --- Security findings contribute to Axis B ---
+var l13SecReg = [{
+  relativePath: 'src/api.js',
+  path: '/tmp/src/api.js',
+  size: 300,
+  territory: 'application',
+  surface: { avgLineLength: 30 },
+  compression: { compressionScore: 0, selfRatio: 0.4 },
+  findings: [
+    { value: 'ghp_1234abcdef567890', confidence: 'HIGH', pipelineScore: 0.85, signalCount: 3 },
+  ],
+  review: [],
+  urlFindings: [
+    { url: 'http://10.0.0.1/admin', classification: 'internal-exposed', internal: true, sensitivePath: true, queryFindings: [], lineIndex: 5 },
+  ],
+  patternHits: [
+    { ruleId: 'hardcoded-secret', ruleName: 'Hardcoded secret', category: 'security', severity: 9, line: 'const key = "ghp_..."', lineIndex: 2, fix: 'Use env vars' },
+  ],
+}];
+var l13SecResult = L13.computeAxes(l13SecReg);
+assert(l13SecResult.axes.B > 0, 'L13 security: Axis B > 0 (got ' + l13SecResult.axes.B + ')');
+assert(l13SecResult.perFile[0].breakdown.B.findings > 0, 'L13 security: findings contribute to Axis B');
+assert(l13SecResult.perFile[0].breakdown.B.urls > 0, 'L13 security: URLs contribute to Axis B');
+
+// --- Quality patterns contribute to Axis C ---
+var l13QualReg = [{
+  relativePath: 'src/handler.js',
+  path: '/tmp/src/handler.js',
+  size: 400,
+  territory: 'application',
+  surface: { avgLineLength: 40 },
+  compression: { compressionScore: 0, selfRatio: 0.4 },
+  findings: [],
+  review: [],
+  urlFindings: [],
+  patternHits: [
+    { ruleId: 'empty-catch', ruleName: 'Empty catch', category: 'error-handling', severity: 8, line: 'catch(e) {}', lineIndex: 3, fix: 'Handle the error' },
+    { ruleId: 'async-no-await', ruleName: 'Async no await', category: 'async-abuse', severity: 6, line: 'async function foo() { return 1; }', lineIndex: 8, fix: 'Remove async' },
+  ],
+}];
+var l13QualResult = L13.computeAxes(l13QualReg);
+assert(l13QualResult.axes.C > 0, 'L13 quality: Axis C > 0 (got ' + l13QualResult.axes.C + ')');
+assert(l13QualResult.perFile[0].breakdown.C.patterns > 0, 'L13 quality: patterns contribute to Axis C');
+
+// --- Axes are independent: security-heavy file should have B > A, C ---
+assert(l13SecResult.axes.B > l13SecResult.axes.A || l13SecResult.axes.B > l13SecResult.axes.C,
+  'L13 independence: security file has Axis B dominating');
+
+// --- Clean file → all axes near 0 ---
+var l13CleanReg = [{
+  relativePath: 'src/clean.js',
+  path: '/tmp/src/clean.js',
+  size: 200,
+  territory: 'application',
+  surface: { avgLineLength: 40 },
+  compression: { compressionScore: 0, selfRatio: 0.5 },
+  findings: [],
+  review: [],
+  urlFindings: [],
+  patternHits: [],
+}];
+var l13CleanResult = L13.computeAxes(l13CleanReg);
+assert(l13CleanResult.axes.A === 0 && l13CleanResult.axes.B === 0 && l13CleanResult.axes.C === 0,
+  'L13 clean file: all axes 0');
+
+// --- Compression contributes to Axis A ---
+var l13CompReg = [{
+  relativePath: 'src/generated.js',
+  path: '/tmp/src/generated.js',
+  size: 1000,
+  territory: 'application',
+  surface: { avgLineLength: 50 },
+  compression: { compressionScore: 80, selfRatio: 0.15 },
+  findings: [],
+  review: [],
+  urlFindings: [],
+  patternHits: [],
+}];
+var l13CompResult = L13.computeAxes(l13CompReg);
+assert(l13CompResult.axes.A > 0, 'L13 compression: high compressionScore raises Axis A (got ' + l13CompResult.axes.A + ')');
+
+// --- Project aggregation: vendor files weigh less ---
+var l13MixedReg = [
+  {
+    relativePath: 'src/app.js', path: '/tmp/src/app.js', size: 500, territory: 'application',
+    surface: { avgLineLength: 50 }, compression: { compressionScore: 60, selfRatio: 0.2 },
+    findings: [], review: [], urlFindings: [], patternHits: [],
+  },
+  {
+    relativePath: 'vendor/lib.js', path: '/tmp/vendor/lib.js', size: 500, territory: 'vendor',
+    surface: { avgLineLength: 50 }, compression: { compressionScore: 80, selfRatio: 0.1 },
+    findings: [], review: [], urlFindings: [], patternHits: [],
+  },
+];
+var l13MixedResult = L13.computeAxes(l13MixedReg);
+// Application file (weight 1.0) should dominate over vendor (weight 0.1)
+assert(l13MixedResult.project.axes.A < 30, 'L13 project: vendor file weighted down in aggregate');
+
+// --- Calibration multipliers reduce pattern scores ---
+var l13CalibReg = [{
+  relativePath: 'src/wordy.js', path: '/tmp/src/wordy.js', size: 500, territory: 'application',
+  surface: { avgLineLength: 50 }, compression: { compressionScore: 0, selfRatio: 0.4 },
+  findings: [], review: [], urlFindings: [],
+  patternHits: [
+    { ruleId: 'verbose-1', ruleName: 'Verbose 1', category: 'verbosity', severity: 5, line: '...', lineIndex: 0, fix: 'x' },
+    { ruleId: 'verbose-2', ruleName: 'Verbose 2', category: 'verbosity', severity: 5, line: '...', lineIndex: 1, fix: 'x' },
+  ],
+}];
+var l13NoCal = L13.computeAxes(l13CalibReg);
+var l13WithCal = L13.computeAxes(l13CalibReg, { confidenceMultipliers: { verbosity: 0.5 } });
+assert(l13WithCal.axes.A < l13NoCal.axes.A, 'L13 calibration: multiplier 0.5 reduces Axis A');
+
+// --- L14 Report Assembly ---
+section('L14 — Report assembly');
+
+var L14 = require('../src/pipeline/L14-report.js');
+
+// --- Verdicts ---
+assert(L14._verdict(0) === 'Clean', 'L14 verdict: 0 → Clean');
+assert(L14._verdict(5) === 'Minimal', 'L14 verdict: 5 → Minimal');
+assert(L14._verdict(15) === 'Some issues', 'L14 verdict: 15 → Some issues');
+assert(L14._verdict(40) === 'Concerning', 'L14 verdict: 40 → Concerning');
+assert(L14._verdict(60) === 'Heavy', 'L14 verdict: 60 → Heavy');
+assert(L14._verdict(90) === 'Critical', 'L14 verdict: 90 → Critical');
+
+// --- Mask value ---
+assert(L14._maskValue('ghp_1234567890abcdef') === 'ghp_**************ef', 'L14 mask: long value masked');
+assert(L14._maskValue('short') === '********', 'L14 mask: short value fully masked');
+assert(L14._maskValue('') === '********', 'L14 mask: empty string');
+
+// --- Empty report ---
+var l14EmptyScoring = { axes: { A: 0, B: 0, C: 0 }, perFile: [], project: { axes: { A: 0, B: 0, C: 0 }, fileCount: 0, totalLines: 0 } };
+var l14EmptyReport = L14.assembleReport(l14EmptyScoring, []);
+assert(l14EmptyReport.secrets.length === 0, 'L14 empty: no secrets');
+assert(l14EmptyReport.exposure.length === 0, 'L14 empty: no exposure');
+assert(l14EmptyReport.patternHits.length === 0, 'L14 empty: no pattern hits');
+assert(l14EmptyReport.review.length === 0, 'L14 empty: no review items');
+assert(l14EmptyReport.slopBreakdown.length === 0, 'L14 empty: no slop breakdown');
+assert(l14EmptyReport.cleanFiles.length === 0, 'L14 empty: no clean files');
+
+// --- Full report with mixed data ---
+var l14Registry = [
+  {
+    relativePath: 'src/api.js', path: '/tmp/src/api.js',
+    findings: [
+      { value: 'sk-proj-abcdefgh12345678', confidence: 'HIGH', pipelineScore: 0.9, signalCount: 4, lineIndex: 10 },
+    ],
+    review: [
+      { value: 'maybe-a-secret-maybe-not', confidence: 'UNCERTAIN', pipelineScore: 0.35, signalCount: 1, lineIndex: 20 },
+    ],
+    urlFindings: [
+      { url: 'http://192.168.1.1/admin', classification: 'internal-exposed', internal: true, sensitivePath: true, queryFindings: [], lineIndex: 5 },
+    ],
+    patternHits: [
+      { ruleId: 'hardcoded-secret', ruleName: 'Hardcoded secret', category: 'security', severity: 9, line: 'const key = "sk-..."', lineIndex: 10, fix: 'Use env vars' },
+      { ruleId: 'empty-catch', ruleName: 'Empty catch', category: 'error-handling', severity: 8, line: 'catch(e) {}', lineIndex: 30, fix: 'Handle error' },
+    ],
+  },
+  {
+    relativePath: 'src/clean.js', path: '/tmp/src/clean.js',
+    findings: [],
+    review: [],
+    urlFindings: [],
+    patternHits: [],
+  },
+];
+var l14Scoring = {
+  axes: { A: 20, B: 45, C: 15 },
+  perFile: [
+    { path: 'src/api.js', axes: { A: 40, B: 90, C: 30 }, breakdown: {}, lineCount: 50, roleWeight: 1.0 },
+    { path: 'src/clean.js', axes: { A: 0, B: 0, C: 0 }, breakdown: {}, lineCount: 50, roleWeight: 1.0 },
+  ],
+  project: { axes: { A: 20, B: 45, C: 15 }, totalLines: 100, fileCount: 2 },
+};
+var l14Report = L14.assembleReport(l14Scoring, l14Registry);
+
+// Secrets
+assert(l14Report.secrets.length === 1, 'L14 report: 1 secret found');
+assert(l14Report.secrets[0].file === 'src/api.js', 'L14 report: secret in correct file');
+assert(l14Report.secrets[0].value.indexOf('****') !== -1, 'L14 report: secret value is masked');
+
+// Exposure
+assert(l14Report.exposure.length === 1, 'L14 report: 1 exposure item');
+assert(l14Report.exposure[0].classification === 'internal-exposed', 'L14 report: correct classification');
+
+// Pattern hits
+assert(l14Report.patternHits.length === 2, 'L14 report: 2 pattern hits');
+assert(l14Report.patternHits[0].file === 'src/api.js', 'L14 report: hit has file');
+assert(typeof l14Report.patternHits[0].fix === 'string', 'L14 report: hit has fix');
+
+// Slop breakdown
+assert(l14Report.slopBreakdown.length === 2, 'L14 report: 2 categories in breakdown');
+assert(l14Report.slopBreakdown[0].hitCount >= 1, 'L14 report: breakdown has hit count');
+
+// Clean files
+assert(l14Report.cleanFiles.length === 1, 'L14 report: 1 clean file');
+assert(l14Report.cleanFiles[0].file === 'src/clean.js', 'L14 report: clean file is correct');
+
+// Review bucket — UNCERTAIN findings go here, not in secrets
+assert(l14Report.review.length === 1, 'L14 report: 1 review item');
+assert(l14Report.review[0].file === 'src/api.js', 'L14 report: review item has file');
+
+// Project summary
+assert(l14Report.projectSummary.fileCount === 2, 'L14 report: projectSummary has fileCount');
+assert(typeof l14Report.projectSummary.verdicts.A === 'string', 'L14 report: has verdict for Axis A');
+assert(typeof l14Report.projectSummary.verdicts.B === 'string', 'L14 report: has verdict for Axis B');
+assert(typeof l14Report.projectSummary.verdicts.C === 'string', 'L14 report: has verdict for Axis C');
+assert(l14Report.projectSummary.verdicts.B === 'Concerning', 'L14 report: Axis B verdict is Concerning (45)');
+
+// Per-file passthrough
+assert(l14Report.perFile.length === 2, 'L14 report: perFile passed through');
+
+// --- UNCERTAIN never appears in secrets ---
+var l14SecretConfidences = l14Report.secrets.map(function (s) { return s.confidence; });
+assert(l14SecretConfidences.indexOf('UNCERTAIN') === -1, 'L14 report: no UNCERTAIN in secrets');
+
+// --- Correlation data in project summary ---
+var l14CorrelatedReport = L14.assembleReport(l14Scoring, l14Registry, { duplicateSecrets: [{ value: 'x', fileCount: 2 }] });
+assert(l14CorrelatedReport.projectSummary.correlation !== null, 'L14 report: correlation data in project summary');
+assert(l14CorrelatedReport.projectSummary.correlation.duplicateSecrets.length === 1, 'L14 report: correlation has duplicateSecrets');
+
+// --- Safe-external URLs excluded from exposure ---
+var l14SafeReg = [{
+  relativePath: 'src/config.js', path: '/tmp/src/config.js',
+  findings: [], review: [],
+  urlFindings: [
+    { url: 'https://api.github.com/repos', classification: 'safe-external', internal: false, queryFindings: [], lineIndex: 1 },
+  ],
+  patternHits: [],
+}];
+var l14SafeReport = L14.assembleReport(l14EmptyScoring, l14SafeReg);
+assert(l14SafeReport.exposure.length === 0, 'L14 report: safe-external URLs excluded from exposure');
+
 // --- L11 Cross-File Correlation ---
 section('L11 — Cross-file correlation');
 

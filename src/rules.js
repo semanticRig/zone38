@@ -455,7 +455,25 @@ var rules = [
       var trimmed = line.trim();
       if (!trimmed || trimmed === '{' || trimmed === '}' || trimmed === '};' ||
           trimmed.startsWith('//') || trimmed.startsWith('*')) return false;
-      return spaces >= 20;
+      if (spaces < 20) return false;
+      // Data nesting exclusions: array elements, method calls on this/self,
+      // string/number literals, closing brackets, chained property access,
+      // continuation lines, constructors, and object-literal entries
+      // are structural data — not logic nesting.
+      if (/^(this\.|self\.|sb\.)/.test(trimmed)) return false;
+      if (/^['"`\d(\[,\])]/.test(trimmed)) return false;
+      if (/^\w+\.\w+\(/.test(trimmed) && !/^(if|else|for|while|switch|do|try)\b/.test(trimmed)) return false;
+      if (/^(var|let|const)\s/.test(trimmed)) return false;
+      // Continuation lines: start with identifier + operator/comma/close, e.g. "w * 0.5, h * 0.3, ..."
+      if (/^\w+\s*[*+/,)\]]/.test(trimmed) && !/^(if|else|for|while|switch|do|try)\b/.test(trimmed)) return false;
+      // Constructor calls: new Foo(...) is data construction
+      if (/^new\s/.test(trimmed)) return false;
+      // Object-literal entries: {key: ..., lines starting with closing }
+      if (/^\{[\w'"]+\s*:/.test(trimmed)) return false;
+      if (/^\}/.test(trimmed)) return false;
+      // Property assignments: foo.bar = ..., foo.bar.baz = ... (not control flow)
+      if (/^\w+(?:\.\w+)+\s*=/.test(trimmed) && !/^(if|else|for|while|switch|do|try)\b/.test(trimmed)) return false;
+      return true;
     },
     fix: 'Extract deeply nested blocks into named helper functions. Aim for ≤3 levels of nesting.',
   },

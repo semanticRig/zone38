@@ -1789,6 +1789,29 @@ assert(rStructSmell.test('                    return doSomething();', {}), 'stru
 assert(!rStructSmell.test('    return x;', {}), 'structure-smell: does not fire on shallow indent');
 assert(!rStructSmell.test('', {}), 'structure-smell: does not fire on blank line');
 
+// Data nesting exclusions (Bug #3): deeply indented data lines should not fire
+assert(!rStructSmell.test('                    this.createVertexTemplateEntry(s + "shape;",', {}), 'structure-smell: skips this.method() at deep indent');
+assert(!rStructSmell.test('                    self.addPalette("name", true);', {}), 'structure-smell: skips self.method() at deep indent');
+assert(!rStructSmell.test('                    sb.createVertexTemplateFromCells([bg1], w, h);', {}), 'structure-smell: skips sb.method() at deep indent');
+assert(!rStructSmell.test("                    'fillColor=#03B5BB;gradientColor=none;'", {}), 'structure-smell: skips string literal at deep indent');
+assert(!rStructSmell.test('                    60, 72, "", "Name", null, null);', {}), 'structure-smell: skips number/arg list at deep indent');
+assert(!rStructSmell.test('                    var bg1 = new mxCell();', {}), 'structure-smell: skips var declaration at deep indent');
+assert(!rStructSmell.test('                    const x = getValue();', {}), 'structure-smell: skips const declaration at deep indent');
+assert(!rStructSmell.test('                    mxUtils.bind(this, function() {', {}), 'structure-smell: skips chained method call at deep indent');
+assert(!rStructSmell.test('                    w * 0.455, h * 0.26, "", "Arrow SE", null);', {}), 'structure-smell: skips continuation args at deep indent');
+assert(!rStructSmell.test('                    new mxGeometry(0.15, 0.5, 20, 20)', {}), 'structure-smell: skips new constructor at deep indent');
+assert(!rStructSmell.test('                    {id: "foo", name: "bar"},', {}), 'structure-smell: skips object literal entry at deep indent');
+assert(!rStructSmell.test('                    {title: "Section A"},', {}), 'structure-smell: skips object literal title entry at deep indent');
+assert(!rStructSmell.test('                    });', {}), 'structure-smell: skips closing }); at deep indent');
+assert(!rStructSmell.test('                    }));', {}), 'structure-smell: skips closing })); at deep indent');
+assert(!rStructSmell.test('                    content.style.display = "none";', {}), 'structure-smell: skips property assignment at deep indent');
+assert(!rStructSmell.test('                    canvas.width = 200;', {}), 'structure-smell: skips property assignment at deep indent (2)');
+// Logic nesting should still fire
+assert(rStructSmell.test('                    if (x > 0) {', {}), 'structure-smell: fires on if at deep indent');
+assert(rStructSmell.test('                    for (var i = 0; i < n; i++) {', {}), 'structure-smell: fires on for at deep indent');
+assert(rStructSmell.test('                    while (running) {', {}), 'structure-smell: fires on while at deep indent');
+assert(rStructSmell.test('                    switch (mode) {', {}), 'structure-smell: fires on switch at deep indent');
+
 // error-silencing: catch + console.error only
 var rErrSilence = findRule('error-silencing');
 var errCtx = {

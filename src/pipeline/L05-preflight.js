@@ -16,6 +16,29 @@ var ROUTING_DENSITY_THRESHOLD = 0.35;
 // Structural routing chars — same set as L02 surface characterisation
 var ROUTING_CHARS = '{};()[]<>';
 
+// Semicolon-delimited key=value style strings (CSS-like, config-like).
+// Matches patterns like "fillColor=#03B5BB;gradientColor=none;" or "dashed=0;html=1;".
+// If ≥50% of semicolon-separated segments are key=value pairs, it's a style literal.
+var KV_SEGMENT_RE = /^[\w.-]+=.+$/;
+
+function _isStyleLiteral(value) {
+  // Must contain at least one semicolon — the delimiter
+  if (value.indexOf(';') === -1) return false;
+  var segments = value.split(';');
+  // Filter out empty trailing segments from trailing semicolons
+  var nonEmpty = [];
+  for (var i = 0; i < segments.length; i++) {
+    var trimmed = segments[i].trim();
+    if (trimmed.length > 0) nonEmpty.push(trimmed);
+  }
+  if (nonEmpty.length < 2) return false;
+  var kvCount = 0;
+  for (var j = 0; j < nonEmpty.length; j++) {
+    if (KV_SEGMENT_RE.test(nonEmpty[j])) kvCount++;
+  }
+  return kvCount / nonEmpty.length >= 0.5;
+}
+
 function _lineRoutingDensity(line) {
   if (!line || line.length === 0) return 0;
   var count = 0;
@@ -65,20 +88,24 @@ function preflight(candidates, _fileRecord) {
     //    structural symbols, it's code structure — not a data payload
     if (_lineRoutingDensity(c.line) > ROUTING_DENSITY_THRESHOLD) continue;
 
-    // 2. Blob classification: extremely long values are unlikely to be secrets;
+    // 2. Style-literal discard: semicolon-delimited key=value pairs are
+    //    CSS/SVG/config style strings, not secrets (eliminates draw.io-style FPs)
+    if ((c.type === 'string' || c.type === 'kv') && _isStyleLiteral(value)) continue;
+
+    // 3. Blob classification: extremely long values are unlikely to be secrets;
     //    lower their priority but keep them for URL/pattern analysis
     if (value.length > BLOB_THRESHOLD) {
       c.priority = 'blob';
     }
 
-    // 3. Length + friction gate: very short values with no class transitions
+    // 4. Length + friction gate: very short values with no class transitions
     //    are almost certainly identifiers or config labels — skip
     if (value.length < MIN_LEN) continue;
     if (value.length < 8 && _classTransitionCount(value) === 0) {
       c.priority = 'low';
     }
 
-    // 4. Rolling hash deduplication: keep only the first occurrence of each value
+    // 5. Rolling hash deduplication: keep only the first occurrence of each value
     var h = _hash(value);
     if (seen[h]) continue;
     seen[h] = true;
@@ -94,5 +121,6 @@ module.exports = {
   // Exported for tests
   _lineRoutingDensity: _lineRoutingDensity,
   _classTransitionCount: _classTransitionCount,
+  _isStyleLiteral: _isStyleLiteral,
   _hash: _hash,
 };

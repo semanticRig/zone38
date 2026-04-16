@@ -13,7 +13,7 @@ var YELLOW = '\x1b[33m';
 function printHelp() {
   var lines = [
     '',
-    BOLD + CYAN + '  slopguard' + RESET + ' — Detects AI slop in your codebase before your tech lead does.',
+    BOLD + '  slopguard' + RESET + ' — Detects AI slop in your codebase before your tech lead does.',
     '',
     BOLD + '  USAGE' + RESET,
     '    slopguard <path> [options]',

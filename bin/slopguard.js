@@ -32,6 +32,7 @@ function printHelp() {
     '    --mcp               Scan MCP server configurations for risky patterns',
     '    --axis=A,B,C        Limit output to specific scoring axes (v2)',
     '    --threshold=A:N     Override exit-code threshold per axis, e.g. A:40,B:20 (v2)',
+    '    --v1                Use legacy v1 single-score engine',
     '',
     BOLD + '  EXAMPLES' + RESET,
     '    slopguard .',
@@ -51,24 +52,25 @@ if (args.includes('--help') || args.includes('-h')) {
 var path = require('path');
 var scanner = require('../src/scanner');
 var scorer = require('../src/scorer');
+var pipelineRunner = require('../src/pipeline/runner');
+var L15 = require('../src/pipeline/L15-output');
 
 var verbose = args.includes('--verbose');
 var jsonMode = args.includes('--json');
 var mcpMode = args.includes('--mcp');
+var v1Mode = args.includes('--v1');
 
-// --axis=A,B,C  (v2 — parsed but not yet consumed by v0.0.1 output path)
+// --axis=A,B,C
 var axisArg = null;
 for (var ai = 0; ai < args.length; ai++) {
   if (args[ai].indexOf('--axis=') === 0) { axisArg = args[ai].slice(7); break; }
 }
 
-// --threshold=A:N,B:N,C:N  (v2 — parsed but not yet consumed by v0.0.1 output path)
+// --threshold=A:N,B:N,C:N
 var thresholdArg = null;
 for (var ti = 0; ti < args.length; ti++) {
   if (args[ti].indexOf('--threshold=') === 0) { thresholdArg = args[ti].slice(12); break; }
 }
-
-void axisArg; void thresholdArg; // will be consumed when v2 output layer is implemented
 
 // Find the target path (first non-flag argument)
 var targetPath = null;
@@ -83,6 +85,36 @@ if (!targetPath) {
   process.stderr.write(YELLOW + '[slopguard] No path specified. Run with --help for usage.' + RESET + '\n');
   process.exit(1);
 }
+
+// ---------------------------------------------------------------------------
+// v2 Pipeline Path (default)
+// ---------------------------------------------------------------------------
+if (!v1Mode) {
+  var thresholds = L15._parseThresholds(thresholdArg);
+  var result = pipelineRunner.run(targetPath);
+  var report = result.report;
+
+  if (jsonMode) {
+    process.stdout.write(L15.renderJson(report) + '\n');
+  } else {
+    var cliOutput = L15.renderCli(report, {
+      verbose: verbose,
+      axis: axisArg,
+      targetPath: path.resolve(targetPath),
+    });
+    process.stdout.write(cliOutput);
+    var axes = (report.projectSummary && report.projectSummary.axes) || { A: 0, B: 0, C: 0 };
+    var code = L15.exitCode(axes, thresholds);
+    process.stdout.write(L15.renderBanner(code, axes, thresholds));
+  }
+
+  var v2Axes = (report.projectSummary && report.projectSummary.axes) || { A: 0, B: 0, C: 0 };
+  process.exit(L15.exitCode(v2Axes, thresholds));
+}
+
+// ---------------------------------------------------------------------------
+// v1 Legacy Path (--v1 flag)
+// ---------------------------------------------------------------------------
 
 // --- Run the scan ---
 var scanResult = scanner.scanAll(targetPath, { mcp: mcpMode });

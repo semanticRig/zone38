@@ -1448,6 +1448,128 @@ var l14SafeReg = [{
 var l14SafeReport = L14.assembleReport(l14EmptyScoring, l14SafeReg);
 assert(l14SafeReport.exposure.length === 0, 'L14 report: safe-external URLs excluded from exposure');
 
+// --- L15 Output Formatting ---
+section('L15 — Output formatting');
+
+var L15 = require('../src/pipeline/L15-output.js');
+
+// --- Axis filter parsing ---
+assert(L15._parseAxisFilter(null) === null, 'L15 parseAxisFilter: null → null');
+assert(L15._parseAxisFilter('') === null, 'L15 parseAxisFilter: empty → null');
+var l15Filter = L15._parseAxisFilter('A,C');
+assert(l15Filter.A === true && l15Filter.C === true && !l15Filter.B, 'L15 parseAxisFilter: A,C');
+var l15FilterLower = L15._parseAxisFilter('a,b');
+assert(l15FilterLower.A === true && l15FilterLower.B === true, 'L15 parseAxisFilter: case insensitive');
+
+// --- Threshold parsing ---
+var l15DefThresh = L15._parseThresholds(null);
+assert(l15DefThresh.A === 50 && l15DefThresh.B === 25 && l15DefThresh.C === 100, 'L15 parseThresholds: defaults');
+var l15CustomThresh = L15._parseThresholds('A:30,B:15');
+assert(l15CustomThresh.A === 30, 'L15 parseThresholds: A overridden to 30');
+assert(l15CustomThresh.B === 15, 'L15 parseThresholds: B overridden to 15');
+assert(l15CustomThresh.C === 100, 'L15 parseThresholds: C unchanged at 100');
+
+// --- Exit code ---
+assert(L15.exitCode({ A: 0, B: 0, C: 0 }) === 0, 'L15 exitCode: all zero → 0');
+assert(L15.exitCode({ A: 51, B: 0, C: 0 }) === 1, 'L15 exitCode: A > 50 → 1');
+assert(L15.exitCode({ A: 0, B: 26, C: 0 }) === 1, 'L15 exitCode: B > 25 → 1');
+assert(L15.exitCode({ A: 0, B: 0, C: 99 }) === 0, 'L15 exitCode: C < 100 → 0');
+assert(L15.exitCode({ A: 40, B: 20, C: 50 }) === 0, 'L15 exitCode: all within defaults → 0');
+assert(L15.exitCode({ A: 40, B: 20, C: 50 }, { A: 30, B: 10, C: 40 }) === 1, 'L15 exitCode: custom thresholds → 1');
+assert(L15.exitCode({ A: 10, B: 5, C: 10 }, { A: 30, B: 10, C: 40 }) === 0, 'L15 exitCode: custom thresholds → 0');
+
+// --- Roast lookup ---
+assert(typeof L15._getRoast(5, L15.ROASTS_A) === 'string', 'L15 getRoast: returns a string');
+assert(L15._getRoast(80, L15.ROASTS_A).length > 0, 'L15 getRoast: high score returns non-empty');
+assert(L15._getRoast(0, L15.ROASTS_B).length > 0, 'L15 getRoast: zero score returns non-empty');
+
+// --- renderJson ---
+var l15TestReport = { projectSummary: { axes: { A: 10, B: 5, C: 3 } }, secrets: [], patternHits: [] };
+var l15Json = L15.renderJson(l15TestReport);
+var l15Parsed = JSON.parse(l15Json);
+assert(l15Parsed.projectSummary.axes.A === 10, 'L15 renderJson: valid JSON with correct data');
+
+// --- renderCli ---
+var l15CliReport = {
+  projectSummary: {
+    axes: { A: 30, B: 10, C: 5 },
+    verdicts: { A: 'Some issues', B: 'Minimal', C: 'Minimal' },
+    fileCount: 3,
+    totalLines: 150,
+  },
+  perFile: [
+    { path: 'src/a.js', axes: { A: 60, B: 20, C: 10 }, breakdown: {}, lineCount: 50, roleWeight: 1.0 },
+    { path: 'src/b.js', axes: { A: 0, B: 0, C: 0 }, breakdown: {}, lineCount: 50, roleWeight: 1.0 },
+  ],
+  secrets: [
+    { value: 'sk-p****xy', file: 'src/a.js', line: 5, confidence: 'HIGH', signals: 3 },
+  ],
+  exposure: [
+    { url: 'http://10.0.0.1/admin', classification: 'internal-exposed', file: 'src/a.js', line: 10 },
+  ],
+  patternHits: [
+    { ruleId: 'empty-catch', ruleName: 'Empty catch', category: 'error-handling', severity: 8, file: 'src/a.js', line: 3, source: 'catch(e) {}', fix: 'Handle error' },
+  ],
+  slopBreakdown: [
+    { category: 'error-handling', hitCount: 1, fileCount: 1, topSeverity: 8 },
+  ],
+  review: [
+    { value: 'mayb****et', file: 'src/a.js', line: 20, pipelineScore: 0.35, signals: 1 },
+  ],
+  cleanFiles: [{ file: 'src/b.js', axes: { A: 0, B: 0, C: 0 } }],
+};
+
+var l15CliOutput = L15.renderCli(l15CliReport, { verbose: true, targetPath: '/tmp/project' });
+assert(typeof l15CliOutput === 'string', 'L15 renderCli: returns string');
+assert(l15CliOutput.indexOf('Axis A') !== -1, 'L15 renderCli: contains Axis A');
+assert(l15CliOutput.indexOf('Axis B') !== -1, 'L15 renderCli: contains Axis B');
+assert(l15CliOutput.indexOf('Axis C') !== -1, 'L15 renderCli: contains Axis C');
+assert(l15CliOutput.indexOf('src/a.js') !== -1, 'L15 renderCli: contains file path');
+assert(l15CliOutput.indexOf('Secrets detected') !== -1, 'L15 renderCli: contains secrets section');
+assert(l15CliOutput.indexOf('Exposure risks') !== -1, 'L15 renderCli: contains exposure section');
+assert(l15CliOutput.indexOf('Pattern hits') !== -1, 'L15 renderCli: contains pattern hits (verbose)');
+assert(l15CliOutput.indexOf('Slop breakdown') !== -1, 'L15 renderCli: contains slop breakdown (verbose)');
+assert(l15CliOutput.indexOf('Review bucket') !== -1, 'L15 renderCli: contains review section');
+
+// --- renderCli with axis filter ---
+var l15FilteredOutput = L15.renderCli(l15CliReport, { axis: 'B' });
+assert(l15FilteredOutput.indexOf('Axis B') !== -1, 'L15 renderCli filtered: contains Axis B');
+assert(l15FilteredOutput.indexOf('Axis A') === -1, 'L15 renderCli filtered: excludes Axis A');
+
+// --- renderBanner ---
+var l15PassBanner = L15.renderBanner(0, { A: 10, B: 5, C: 3 }, L15.DEFAULT_THRESHOLDS);
+assert(l15PassBanner.indexOf('PASS') !== -1, 'L15 renderBanner: pass shows PASS');
+var l15FailBanner = L15.renderBanner(1, { A: 60, B: 30, C: 5 }, L15.DEFAULT_THRESHOLDS);
+assert(l15FailBanner.indexOf('FAIL') !== -1, 'L15 renderBanner: fail shows FAIL');
+assert(l15FailBanner.indexOf('Axis A') !== -1, 'L15 renderBanner: fail shows reason');
+
+// --- Pipeline Runner integration ---
+section('Pipeline Runner');
+
+var runner = require('../src/pipeline/runner.js');
+
+// Run on fixtures directory
+var l15RunResult = runner.run('test/fixtures');
+assert(l15RunResult.report !== undefined, 'runner: returns report');
+assert(l15RunResult.registry !== undefined, 'runner: returns registry');
+assert(l15RunResult.calibration !== undefined, 'runner: returns calibration');
+assert(l15RunResult.correlation !== undefined, 'runner: returns correlation');
+assert(l15RunResult.scoring !== undefined, 'runner: returns scoring');
+assert(l15RunResult.report.projectSummary.fileCount > 0, 'runner: scanned files');
+assert(typeof l15RunResult.report.projectSummary.axes.A === 'number', 'runner: Axis A is number');
+assert(typeof l15RunResult.report.projectSummary.axes.B === 'number', 'runner: Axis B is number');
+assert(typeof l15RunResult.report.projectSummary.axes.C === 'number', 'runner: Axis C is number');
+assert(l15RunResult.report.projectSummary.verdicts.A !== undefined, 'runner: has Axis A verdict');
+assert(Array.isArray(l15RunResult.report.secrets), 'runner: report has secrets array');
+assert(Array.isArray(l15RunResult.report.patternHits), 'runner: report has patternHits array');
+assert(Array.isArray(l15RunResult.report.review), 'runner: report has review array');
+assert(Array.isArray(l15RunResult.report.cleanFiles), 'runner: report has cleanFiles array');
+
+// Sloppy fixture should produce hits
+assert(l15RunResult.report.patternHits.length > 0, 'runner: sloppy fixture produces pattern hits');
+// Some files should be clean
+assert(l15RunResult.report.cleanFiles.length > 0, 'runner: clean fixture produces clean files');
+
 // --- L11 Cross-File Correlation ---
 section('L11 — Cross-file correlation');
 

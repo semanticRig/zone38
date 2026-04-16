@@ -590,6 +590,87 @@ assert(vector.dimCompressibility('abc') >= 0, 'dimCompressibility handles short 
 // Empty string edge case
 assert(vector.vectorScore('') === 0, 'empty string vectorScore is 0');
 
+// --- L00 Ingestion ---
+section('L00 — Project ingestion');
+
+var L00 = require('../src/pipeline/L00-ingestion.js');
+
+var registry = L00.buildRegistry(path.join(__dirname, 'fixtures'));
+assert(Array.isArray(registry), 'buildRegistry returns an array');
+assert(registry.length >= 3, 'registry has at least 3 fixture files (got ' + registry.length + ')');
+
+// Shape check
+var r0 = registry[0];
+assert(typeof r0.path === 'string', 'record has path');
+assert(typeof r0.relativePath === 'string', 'record has relativePath');
+assert(typeof r0.ext === 'string', 'record has ext');
+assert(typeof r0.size === 'number', 'record has size');
+assert(typeof r0.depth === 'number', 'record has depth');
+assert(typeof r0.territory === 'string', 'record has territory');
+assert(r0.role === null, 'role is null before L01 runs');
+
+// Territory classification
+assert(L00.classifyTerritory('src/server/routes.js') === 'application', 'server/routes.js → application');
+assert(L00.classifyTerritory('test/fixtures/clean.js') === 'test', 'test/fixtures/clean.js → test');
+assert(L00.classifyTerritory('dist/bundle.js') === 'dist', 'dist/bundle.js → dist');
+assert(L00.classifyTerritory('vendor/lodash.js') === 'vendor', 'vendor/lodash.js → vendor');
+assert(L00.classifyTerritory('src/config/settings.js') === 'config', 'config/settings.js → config');
+assert(L00.classifyTerritory('src/utils.js') === 'application', 'utils.js → application');
+
+// Should skip node_modules
+var projectReg = L00.buildRegistry(path.join(__dirname, '..'));
+var nodeModFiles = projectReg.filter(function (r) { return r.path.indexOf('node_modules') !== -1; });
+assert(nodeModFiles.length === 0, 'buildRegistry skips node_modules');
+
+// test fixtures themselves should appear as territory=test or application depending on path
+var serverRecords = registry.filter(function (r) { return r.relativePath.indexOf('server') !== -1; });
+assert(serverRecords.length >= 1, 'server/ fixture files appear in registry');
+
+// --- L01 Role classification ---
+section('L01 — File role classification');
+
+var L01 = require('../src/pipeline/L01-role.js');
+
+// Backend
+var backendRecord = { relativePath: 'src/api/users.js', ext: '.js', territory: 'application' };
+var backendRole = L01.classifyRole(backendRecord);
+assert(backendRole.isBackend === true, 'api/users.js classified as backend');
+assert(backendRole.isFrontend === false, 'api/users.js not classified as frontend');
+assert(backendRole.contextType === 'backend', 'api/users.js contextType = backend');
+
+// Frontend JSX
+var frontendRecord = { relativePath: 'src/component/App.jsx', ext: '.jsx', territory: 'application' };
+var frontendRole = L01.classifyRole(frontendRecord);
+assert(frontendRole.isFrontend === true, 'component/App.jsx classified as frontend');
+assert(frontendRole.isBackend === false, 'component/App.jsx not classified as backend');
+assert(frontendRole.contextType === 'frontend', 'component/App.jsx contextType = frontend');
+
+// Declaration file
+var dtsRecord = { relativePath: 'types/index.d.ts', ext: '.ts', territory: 'application' };
+var dtsRole = L01.classifyRole(dtsRecord);
+assert(dtsRole.isDeclaration === true, 'index.d.ts isDeclaration = true');
+assert(dtsRole.fileType === 'declaration', 'index.d.ts fileType = declaration');
+
+// Test file
+var testRecord = { relativePath: 'test/fixtures/clean.js', ext: '.js', territory: 'test' };
+var testRole = L01.classifyRole(testRecord);
+assert(testRole.isTest === true, 'test fixture isTest = true');
+
+// role is set on the record in place
+assert(testRecord.role !== null, 'classifyRole mutates fileRecord.role in place');
+assert(testRecord.role.isTest === true, 'mutated role.isTest = true');
+
+// Isomorphic (neither backend nor frontend signals)
+var isoRecord = { relativePath: 'src/utils.js', ext: '.js', territory: 'application' };
+var isoRole = L01.classifyRole(isoRecord);
+assert(isoRole.contextType === 'isomorphic', 'utils.js contextType = isomorphic');
+
+// L01 applied to full registry
+var fullReg = L00.buildRegistry(path.join(__dirname, 'fixtures'));
+fullReg.forEach(function (rec) { L01.classifyRole(rec); });
+var allHaveRole = fullReg.every(function (rec) { return rec.role !== null; });
+assert(allHaveRole, 'all registry records have role after L01 applied to registry');
+
 // --- Vector worker ---
 section('Vector worker (batch)');
 

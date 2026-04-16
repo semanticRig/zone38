@@ -648,6 +648,28 @@ assert(nodeModFiles.length === 0, 'buildRegistry skips node_modules');
 var serverRecords = registry.filter(function (r) { return r.relativePath.indexOf('server') !== -1; });
 assert(serverRecords.length >= 1, 'server/ fixture files appear in registry');
 
+// Single-file path support (Bug #1 fix)
+var singleFileReg = L00.buildRegistry(path.join(__dirname, 'fixtures', 'clean.js'));
+assert(Array.isArray(singleFileReg), 'buildRegistry(file) returns an array');
+assert(singleFileReg.length === 1, 'buildRegistry(file) returns exactly 1 record (got ' + singleFileReg.length + ')');
+assert(singleFileReg[0].relativePath === 'clean.js', 'single-file relativePath is the filename');
+assert(singleFileReg[0].ext === '.js', 'single-file ext is .js');
+assert(singleFileReg[0].size > 0, 'single-file size > 0');
+assert(singleFileReg[0].depth === 0, 'single-file depth = 0');
+
+// Single-file with unsupported extension returns empty
+var txtReg = L00.buildRegistry(path.join(__dirname, '..', 'README.md'));
+assert(txtReg.length === 0, 'buildRegistry(non-JS file) returns empty array');
+
+// Non-existent path returns empty
+var ghostReg = L00.buildRegistry('/tmp/does-not-exist-slopguard-test-xyz');
+assert(ghostReg.length === 0, 'buildRegistry(nonexistent) returns empty array');
+
+// Single JSX file
+var jsxReg = L00.buildRegistry(path.join(__dirname, 'fixtures', 'component', 'App.jsx'));
+assert(jsxReg.length === 1, 'buildRegistry(App.jsx) returns 1 record');
+assert(jsxReg[0].ext === '.jsx', 'App.jsx ext is .jsx');
+
 // --- L01 Role classification ---
 section('L01 — File role classification');
 

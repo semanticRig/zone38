@@ -99,7 +99,41 @@ function walkProject(rootDir) {
   return results;
 }
 
+function buildSingleFileEntry(absPath) {
+  var stat;
+  try {
+    stat = fs.statSync(absPath);
+  } catch (_e) {
+    return [];
+  }
+  var ext = path.extname(absPath).toLowerCase();
+  if (!SCAN_EXTENSIONS.has(ext)) return [];
+  var relPath = path.basename(absPath);
+  return [{
+    path: absPath,
+    relativePath: relPath,
+    ext: ext,
+    size: stat.size,
+    depth: 0,
+    territory: classifyTerritory(relPath),
+    role: null,
+    surface: null,
+    compression: null,
+    candidates: null,
+    findings: null,
+    review: null,
+  }];
+}
+
 function buildRegistry(rootDir) {
+  var absRoot = path.resolve(rootDir);
+  var stat;
+  try {
+    stat = fs.statSync(absRoot);
+  } catch (_e) {
+    return [];
+  }
+  if (stat.isFile()) return buildSingleFileEntry(absRoot);
   return walkProject(rootDir);
 }
 

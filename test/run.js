@@ -1060,6 +1060,157 @@ var l05BlobCands = [
 var l05BlobResult = L05.preflight(l05BlobCands, null);
 assert(l05BlobResult.length === 1 && l05BlobResult[0].priority === 'blob', 'preflight classifies oversized values as blob');
 
+// --- L10 Pattern Rule Engine ---
+section('L10 — Pattern rule engine');
+
+var L10 = require('../src/pipeline/L10-patterns.js');
+var allRules = require('../src/rules.js');
+
+// Helper: find rule by id
+function findRule(id) {
+  return allRules.find(function (r) { return r.id === id; });
+}
+
+// applyRules: empty string returns empty array
+assert(L10.applyRules('', {}).length === 0, 'L10: empty content returns no hits');
+
+// applyRules: fires the correct rules from the existing v0 set
+var l10Content = [
+  "var x = a > 0 ? a > 10 ? a > 100 ? 'big' : 'med' : 'sm' : 'neg';",  // excessive-ternary-nesting
+  "console.log('debug');",                                                 // console-log-leftover
+  "eval('bad()');",                                                        // eval-usage
+  "var apiKey = 'sk_live_supersecretkeythatislong';",                      // hardcoded-secret
+].join('\n');
+
+var l10Result = L10.applyRules(l10Content, { filePath: '/app/index.js' });
+var l10Ids = l10Result.map(function (h) { return h.ruleId; });
+assert(l10Ids.indexOf('excessive-ternary-nesting') !== -1, 'L10: fires excessive-ternary-nesting');
+assert(l10Ids.indexOf('console-log-leftover')      !== -1, 'L10: fires console-log-leftover');
+assert(l10Ids.indexOf('eval-usage')                !== -1, 'L10: fires eval-usage');
+assert(l10Ids.indexOf('hardcoded-secret')          !== -1, 'L10: fires hardcoded-secret');
+
+// Hit object shape check
+var l10Hit = l10Result[0];
+assert(typeof l10Hit.ruleId    === 'string', 'L10 hit: has ruleId string');
+assert(typeof l10Hit.severity  === 'number', 'L10 hit: has severity number');
+assert(typeof l10Hit.category  === 'string', 'L10 hit: has category string');
+assert(typeof l10Hit.line      === 'string', 'L10 hit: has line string');
+assert(typeof l10Hit.lineIndex === 'number', 'L10 hit: has lineIndex number');
+assert(typeof l10Hit.fix       === 'string', 'L10 hit: has fix string');
+
+// applyRules: context-aware rules use role from fileRecord
+var l10BackendContent = 'localStorage.setItem("foo", bar);';
+var l10BackendResult = L10.applyRules(l10BackendContent, { isBackend: true });
+var l10FrontResult   = L10.applyRules(l10BackendContent, { isBackend: false });
+assert(l10BackendResult.map(function (h) { return h.ruleId; }).indexOf('localstorage-in-backend') !== -1,
+       'L10: localstorage-in-backend fires for backend file');
+assert(l10FrontResult.map(function (h) { return h.ruleId; }).indexOf('localstorage-in-backend') === -1,
+       'L10: localstorage-in-backend does NOT fire for frontend file');
+
+// --- Tier 1 rules ---
+
+// type-theater: `: any` annotation
+var rTypeTheater = findRule('type-theater');
+assert(rTypeTheater.test('function foo(x: any) { return x; }', {}), 'type-theater: fires on `: any`');
+assert(!rTypeTheater.test('function foo(x: string) { return x; }', {}), 'type-theater: does not fire on typed arg');
+assert(!rTypeTheater.test('// the type is any old string', {}), 'type-theater: does not fire inside comment');
+
+// config-exposure: env var with hardcoded fallback
+var rConfigExp = findRule('config-exposure');
+assert(rConfigExp.test("const s = process.env.SECRET_KEY || 'fallback';", {}), 'config-exposure: fires on SECRET_KEY || fallback');
+assert(!rConfigExp.test("const s = process.env.NODE_ENV || 'development';", {}), 'config-exposure: does not fire on NODE_ENV (no key/secret name)');
+
+// async-abuse: forEach(async)
+var rAsyncAbuse = findRule('async-abuse');
+assert(rAsyncAbuse.test('items.forEach(async (item) => {', {}), 'async-abuse: fires on forEach(async)');
+assert(!rAsyncAbuse.test('items.map(async (item) => {', {}), 'async-abuse: does not fire on map(async)');
+
+// structure-smell: 20 spaces of indent
+var rStructSmell = findRule('structure-smell');
+assert(rStructSmell.test('                    return doSomething();', {}), 'structure-smell: fires on ≥20 spaces');
+assert(!rStructSmell.test('    return x;', {}), 'structure-smell: does not fire on shallow indent');
+assert(!rStructSmell.test('', {}), 'structure-smell: does not fire on blank line');
+
+// error-silencing: catch + console.error only
+var rErrSilence = findRule('error-silencing');
+var errCtx = {
+  lineIndex: 0,
+  lines: ['} catch (err) {', '  console.error(err);', '}'],
+};
+assert(rErrSilence.test('} catch (err) {', errCtx), 'error-silencing: fires when catch only logs');
+var errCtxRecover = {
+  lineIndex: 0,
+  lines: ['} catch (err) {', '  console.error(err);', '  throw err;', '}'],
+};
+assert(!rErrSilence.test('} catch (err) {', errCtxRecover), 'error-silencing: does not fire when catch re-throws');
+
+// --- Tier 2 rules ---
+
+// naming-entropy: single-letter var outside loop
+var rNaming = findRule('naming-entropy');
+assert(rNaming.test('var u = getUser();', {}), 'naming-entropy: fires on single-letter var `u`');
+assert(!rNaming.test('var id = getId();', {}), 'naming-entropy: does not fire on multi-char name');
+assert(!rNaming.test('for (var i = 0; i < n; i++) {', {}), 'naming-entropy: does not fire inside for');
+assert(!rNaming.test('var e = new Error();', {}), 'naming-entropy: does not fire on `e` (error convention)');
+
+// magic-values: large bare number in expression
+var rMagic = findRule('magic-values');
+assert(rMagic.test('if (timeout > 30000) throw new Error();', {}), 'magic-values: fires on > 30000');
+assert(!rMagic.test('const TIMEOUT_MS = 30000;', {}), 'magic-values: does not fire on UPPER_SNAKE constant');
+assert(!rMagic.test('var x = 42;', {}), 'magic-values: does not fire on small 2-digit number');
+
+// import-hygiene: namespace import
+var rImport = findRule('import-hygiene');
+assert(rImport.test("import * as Utils from './utils';", {}), 'import-hygiene: fires on import *');
+assert(!rImport.test("import { foo } from './utils';", {}), 'import-hygiene: does not fire on named import');
+
+// --- Tier 3 rules ---
+
+// test-theater: trivially passing assertion
+var rTestTheater = findRule('test-theater');
+assert(rTestTheater.test('expect(true).toBeTruthy();', {}), 'test-theater: fires on expect(true)');
+assert(rTestTheater.test('assert(true)', {}), 'test-theater: fires on assert(true)');
+assert(!rTestTheater.test('expect(result).toBe(42);', {}), 'test-theater: does not fire on real assertion');
+
+// scaffold-residue: boilerplate placeholder comment
+var rScaffold = findRule('scaffold-residue');
+assert(rScaffold.test('// add your code here', {}), 'scaffold-residue: fires on "add your code here"');
+assert(rScaffold.test('// your logic here', {}), 'scaffold-residue: fires on "your logic here"');
+assert(!rScaffold.test('// this code handles auth', {}), 'scaffold-residue: does not fire on real comment');
+
+// comment-mismatch: TODO inside implemented code
+var rCommentMismatch = findRule('comment-mismatch');
+var cmCtx = {
+  lineIndex: 5,
+  lines: [
+    'function handleAuth(user) {',
+    '  const session = createSession(user);',
+    '  validatePermissions(session);',
+    '  const token = signToken(session);',
+    '  saveToRedis(session);',
+    '  // TODO: implement token validation',
+    '  return token;',
+    '}',
+  ],
+};
+assert(rCommentMismatch.test('  // TODO: implement token validation', cmCtx),
+       'comment-mismatch: fires when TODO exists in implemented function body');
+
+// --- Tier 4 rules ---
+
+// promise-graveyard: floating fetch
+var rPromise = findRule('promise-graveyard');
+assert(rPromise.test('fetch("/api/users");', {}), 'promise-graveyard: fires on floating fetch');
+assert(!rPromise.test('const result = await fetch("/api");', {}), 'promise-graveyard: does not fire on awaited fetch');
+assert(!rPromise.test('return fetch("/api");', {}), 'promise-graveyard: does not fire on returned fetch');
+
+// accessor-bloat: trivial getter
+var rAccessor = findRule('accessor-bloat');
+var abCtx = { lineIndex: 0, lines: ['get name() {', '  return this._name;', '}'] };
+assert(rAccessor.test('get name() {', abCtx), 'accessor-bloat: fires on trivial getter');
+var abCtx2 = { lineIndex: 0, lines: ['get name() {', '  return this._name.trim();', '}'] };
+assert(!rAccessor.test('get name() {', abCtx2), 'accessor-bloat: does not fire when getter transforms value');
+
 // --- L09 URL Topology ---
 section('L09 — URL topology analysis');
 

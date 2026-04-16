@@ -1060,6 +1060,101 @@ var l05BlobCands = [
 var l05BlobResult = L05.preflight(l05BlobCands, null);
 assert(l05BlobResult.length === 1 && l05BlobResult[0].priority === 'blob', 'preflight classifies oversized values as blob');
 
+// --- L09 URL Topology ---
+section('L09 — URL topology analysis');
+
+var L09 = require('../src/pipeline/L09-url.js');
+
+// --- URL parser ---
+var l09Parsed1 = L09._parseUrl('https://api.example.com:8080/v1/users?token=abc&id=1#section');
+assert(l09Parsed1.scheme   === 'https',           'L09 parser: scheme is https');
+assert(l09Parsed1.host     === 'api.example.com', 'L09 parser: host is api.example.com');
+assert(l09Parsed1.port     === '8080',            'L09 parser: port is 8080');
+assert(l09Parsed1.path     === '/v1/users',       'L09 parser: path is /v1/users');
+assert(l09Parsed1.query    === 'token=abc&id=1',  'L09 parser: query string is correct');
+assert(l09Parsed1.fragment === 'section',         'L09 parser: fragment is section');
+
+// No path URL
+var l09Parsed2 = L09._parseUrl('http://localhost');
+assert(l09Parsed2.host === 'localhost', 'L09 parser: handles URL with no path');
+assert(l09Parsed2.path === '',          'L09 parser: path is empty when absent');
+
+// No query URL
+var l09Parsed3 = L09._parseUrl('https://example.com/path/to/resource');
+assert(l09Parsed3.query === '', 'L09 parser: query is empty when absent');
+
+// --- Internal host classification ---
+assert(L09._isInternal('10.0.1.5'),             'L09 internal: 10.x is private');
+assert(L09._isInternal('192.168.1.100'),         'L09 internal: 192.168.x is private');
+assert(L09._isInternal('172.20.0.1'),            'L09 internal: 172.20.x is private');
+assert(L09._isInternal('127.0.0.1'),             'L09 internal: 127.x is loopback');
+assert(L09._isInternal('localhost'),             'L09 internal: localhost is internal');
+assert(L09._isInternal('service.svc'),           'L09 internal: .svc TLD is internal');
+assert(L09._isInternal('api.cluster.local'),     'L09 internal: .cluster.local is internal');
+assert(L09._isInternal('db.internal'),           'L09 internal: .internal TLD is internal');
+assert(L09._isInternal('server.lan'),            'L09 internal: .lan TLD is internal');
+assert(!L09._isInternal('api.example.com'),      'L09 internal: public host is NOT internal');
+assert(!L09._isInternal('8.8.8.8'),              'L09 internal: public IP is NOT internal');
+
+// --- Sensitive path classification ---
+assert(L09._isSensitivePath('/admin'),                 'L09 path: /admin is sensitive');
+assert(L09._isSensitivePath('/admin/users'),           'L09 path: /admin/users is sensitive');
+assert(L09._isSensitivePath('/api/v1/actuator/health'),'L09 path: /actuator mid-path is sensitive');
+assert(L09._isSensitivePath('/metrics'),               'L09 path: /metrics is sensitive');
+assert(L09._isSensitivePath('/debug'),                 'L09 path: /debug is sensitive');
+assert(!L09._isSensitivePath('/api/v1/users'),         'L09 path: normal API path is NOT sensitive');
+assert(!L09._isSensitivePath('/'),                     'L09 path: root path is NOT sensitive');
+
+// --- Query string parser ---
+var l09Params = L09._parseQuery('token=abc123&id=42&empty=');
+assert(l09Params.length === 1 || l09Params.length === 2, 'L09 query: 2 non-trivial params parsed (empty filtered)');
+var l09ParamKeys = l09Params.map(function (p) { return p.key; });
+assert(l09ParamKeys.indexOf('token') !== -1, 'L09 query: token param found');
+
+var l09EmptyQuery = L09._parseQuery('');
+assert(l09EmptyQuery.length === 0, 'L09 query: empty string → no params');
+
+var l09NoEq = L09._parseQuery('noequalssign');
+assert(l09NoEq.length === 0, 'L09 query: param without = is skipped');
+
+// --- analyseUrls: empty input ---
+assert(L09.analyseUrls([]).length === 0, 'L09 analyseUrls: empty input returns []');
+
+// Helper for building URL candidates
+function makeUrlCand(url, lineIndex) {
+  return { value: url, line: 'var x = "' + url + '"', col: 9,
+           lineIndex: lineIndex || 0, identifierName: null,
+           callSiteContext: null, type: 'url', priority: 'normal' };
+}
+
+// internal-exposed: RFC 1918 host
+var l09IntResult = L09.analyseUrls([makeUrlCand('http://10.0.1.5/api/data')]);
+assert(l09IntResult.length === 1,                            'L09 analyseUrls: returns one result per URL');
+assert(l09IntResult[0].classification === 'internal-exposed','L09 analyseUrls: 10.x host → internal-exposed');
+assert(l09IntResult[0].internal === true,                    'L09 analyseUrls: internal flag true for private IP');
+
+// internal-exposed: .internal TLD
+var l09IntTld = L09.analyseUrls([makeUrlCand('https://db.internal/query')]);
+assert(l09IntTld[0].classification === 'internal-exposed', 'L09 analyseUrls: .internal TLD → internal-exposed');
+
+// safe-external: public CDN
+var l09ExtResult = L09.analyseUrls([makeUrlCand('https://cdn.example.com/logo.png')]);
+assert(l09ExtResult[0].classification === 'safe-external', 'L09 analyseUrls: CDN URL → safe-external');
+assert(l09ExtResult[0].internal === false,                 'L09 analyseUrls: internal flag false for public host');
+
+// suspicious-external: plain http + sensitive path
+var l09SuspResult = L09.analyseUrls([makeUrlCand('http://api.example.com/admin/settings')]);
+assert(l09SuspResult[0].sensitivePath === true,                  'L09 analyseUrls: /admin path detected');
+assert(l09SuspResult[0].classification === 'suspicious-external','L09 analyseUrls: http+admin path → suspicious-external');
+
+// Result shape check
+var l09Shape = l09IntResult[0];
+assert(typeof l09Shape.url            === 'string', 'L09 result has url');
+assert(typeof l09Shape.parsed         === 'object', 'L09 result has parsed');
+assert(typeof l09Shape.classification === 'string', 'L09 result has classification');
+assert(Array.isArray(l09Shape.queryFindings),        'L09 result has queryFindings array');
+assert(Array.isArray(l09Shape.queryReview),          'L09 result has queryReview array');
+
 // --- L06 Herd Discrimination ---
 section('L06 — Herd discrimination');
 

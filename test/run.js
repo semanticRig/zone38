@@ -721,6 +721,61 @@ L02.characteriseRecord(fakeRecord, cleanContent);
 assert(fakeRecord.surface !== null, 'characteriseRecord sets fileRecord.surface');
 assert(typeof fakeRecord.surface.routingDensity === 'number', 'characteriseRecord result has routingDensity');
 
+// --- L03 Compression Texture Analysis ---
+section('L03 — Compression texture analysis');
+
+var L03 = require('../src/pipeline/L03-compression.js');
+
+// selfCompressionRatio: between 0 and 1 for real code
+var l03Human = fs.readFileSync(path.join(fixturesDir, 'clean.js'), 'utf8');
+var l03HumanRatio = L03.selfCompressionRatio(l03Human);
+assert(l03HumanRatio > 0 && l03HumanRatio < 1, 'L03 self-ratio for human code in (0,1) (got ' + l03HumanRatio.toFixed(3) + ')');
+
+// Repetitive AI fixture compresses more (lower ratio) than varied human code
+var l03RepContent = fs.readFileSync(path.join(fixturesDir, 'repetitive.js'), 'utf8');
+var l03RepRatio = L03.selfCompressionRatio(l03RepContent);
+assert(l03RepRatio < l03HumanRatio, 'repetitive.js self-ratio < clean.js self-ratio (' + l03RepRatio.toFixed(3) + ' < ' + l03HumanRatio.toFixed(3) + ')');
+
+// NCD: content with itself should be low
+var l03SelfNcd = L03.ncd(l03Human, l03Human);
+assert(l03SelfNcd < 0.3, 'NCD(content, itself) < 0.3 (got ' + l03SelfNcd.toFixed(3) + ')');
+
+// NCD: different content should be higher than self-NCD
+var l03Sloppy = fs.readFileSync(path.join(fixturesDir, 'sloppy.js'), 'utf8');
+var l03DiffNcd = L03.ncd(l03Human, l03Sloppy);
+assert(l03DiffNcd > l03SelfNcd, 'NCD of different files > self-NCD');
+
+// segmentedCompression: returns array of segment objects
+var l03Segments = L03.segmentedCompression(l03RepContent, 10);
+assert(Array.isArray(l03Segments), 'segmentedCompression returns array');
+assert(l03Segments.length > 1, 'segmented result has more than 1 window (got ' + l03Segments.length + ')');
+assert(typeof l03Segments[0].startLine === 'number', 'segment has startLine');
+assert(typeof l03Segments[0].endLine === 'number', 'segment has endLine');
+assert(typeof l03Segments[0].ratio === 'number', 'segment has ratio');
+
+// Short file: returns single segment
+var l03Short = 'var x = 1;\nvar y = 2;\n';
+var l03ShortSeg = L03.segmentedCompression(l03Short, 30);
+assert(l03ShortSeg.length === 1, 'short file → single segment');
+
+// analyseFile: populates fileRecord.compression
+var l03Record = { relativePath: 'clean.js', compression: null };
+var l03Result = L03.analyseFile(l03Record, l03Human);
+assert(l03Record.compression !== null, 'analyseFile mutates fileRecord.compression');
+assert(typeof l03Result.selfRatio === 'number', 'result has selfRatio');
+assert(typeof l03Result.compressionScore === 'number', 'result has compressionScore');
+assert(l03Result.compressionScore >= 0 && l03Result.compressionScore <= 100, 'compressionScore in [0,100]');
+assert(Array.isArray(l03Result.segmentScores), 'result has segmentScores array');
+assert(l03Result.projectOutlierScore === 0, 'projectOutlierScore is 0 placeholder until L12');
+
+// analyseFile with null fileRecord (standalone call)
+var l03Standalone = L03.analyseFile(null, l03Human);
+assert(typeof l03Standalone.selfRatio === 'number', 'standalone analyseFile returns result');
+
+// Repetitive fixture should score higher than clean fixture
+var l03RepResult = L03.analyseFile(null, l03RepContent);
+assert(l03RepResult.compressionScore >= l03Result.compressionScore, 'repetitive.js compression score >= clean.js (' + l03RepResult.compressionScore + ' >= ' + l03Result.compressionScore + ')');
+
 // --- Vector worker ---
 section('Vector worker (batch)');
 

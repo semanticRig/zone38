@@ -671,6 +671,56 @@ fullReg.forEach(function (rec) { L01.classifyRole(rec); });
 var allHaveRole = fullReg.every(function (rec) { return rec.role !== null; });
 assert(allHaveRole, 'all registry records have role after L01 applied to registry');
 
+// --- L02 Surface Characterisation ---
+section('L02 — Surface characterisation');
+
+var L02 = require('../src/pipeline/L02-surface.js');
+
+// Minified fixture: single long line → minified: true
+var minifiedContent = fs.readFileSync(path.join(fixturesDir, 'minified.js'), 'utf8');
+var minifiedSurface = L02.characteriseFile(minifiedContent);
+assert(minifiedSurface.minified === true, 'minified.js → minified: true');
+
+// Repetitive fixture: many near-identical blocks → repetitionFraction > 0.4
+var repetitiveContent = fs.readFileSync(path.join(fixturesDir, 'repetitive.js'), 'utf8');
+var repSurface = L02.characteriseFile(repetitiveContent);
+assert(repSurface.repetitionFraction > 0.4, 'repetitive.js → repetitionFraction > 0.4 (got ' + repSurface.repetitionFraction.toFixed(3) + ')');
+assert(repSurface.minified === false, 'repetitive.js → minified: false');
+
+// Clean fixture: normal human JS → both flags false
+var cleanContent = fs.readFileSync(path.join(fixturesDir, 'clean.js'), 'utf8');
+var cleanSurface = L02.characteriseFile(cleanContent);
+assert(cleanSurface.minified === false, 'clean.js → minified: false');
+assert(cleanSurface.repetitionFraction < 0.4, 'clean.js → repetitionFraction < 0.4 (got ' + cleanSurface.repetitionFraction.toFixed(3) + ')');
+
+// Surface shape
+assert(typeof cleanSurface.routingDensity === 'number', 'surface has routingDensity');
+assert(typeof cleanSurface.avgLineLength === 'number', 'surface has avgLineLength');
+assert(Array.isArray(cleanSurface.lineDistribution), 'surface has lineDistribution array');
+assert(cleanSurface.lineDistribution.length === 4, 'lineDistribution has 4 buckets');
+assert(typeof cleanSurface.whitespaceRatio === 'number', 'surface has whitespaceRatio');
+
+// routingDensity is between 0 and 1
+assert(cleanSurface.routingDensity >= 0 && cleanSurface.routingDensity <= 1, 'routingDensity in [0,1] (got ' + cleanSurface.routingDensity.toFixed(3) + ')');
+
+// whitespaceRatio is between 0 and 1
+assert(cleanSurface.whitespaceRatio > 0 && cleanSurface.whitespaceRatio < 1, 'whitespaceRatio in (0,1) (got ' + cleanSurface.whitespaceRatio.toFixed(3) + ')');
+
+// lineDistribution sums to ~1
+var distSum = cleanSurface.lineDistribution.reduce(function (a, b) { return a + b; }, 0);
+assert(Math.abs(distSum - 1) < 0.01, 'lineDistribution sums to 1 (got ' + distSum.toFixed(3) + ')');
+
+// Empty content → safe zero values
+var emptySurface = L02.characteriseFile('');
+assert(emptySurface.minified === false, 'empty content → minified: false');
+assert(emptySurface.repetitionFraction === 0, 'empty content → repetitionFraction: 0');
+
+// characteriseRecord mutates fileRecord.surface in place
+var fakeRecord = { relativePath: 'test.js', surface: null };
+L02.characteriseRecord(fakeRecord, cleanContent);
+assert(fakeRecord.surface !== null, 'characteriseRecord sets fileRecord.surface');
+assert(typeof fakeRecord.surface.routingDensity === 'number', 'characteriseRecord result has routingDensity');
+
 // --- Vector worker ---
 section('Vector worker (batch)');
 

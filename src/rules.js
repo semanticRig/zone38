@@ -127,8 +127,15 @@ var rules = [
     severity: 5,
     description: 'Nested ternary operators reduce readability. AI frequently chains them instead of using if/else.',
     test: function (line) {
-      // Count ? characters that look like ternary operators (not optional chaining)
-      var ternaryCount = (line.match(/[^?.\s]\s*\?\s*[^?.]/g) || []).length;
+      // Strip string and regex literals first — ? inside them are not ternary operators.
+      // Order matters: strip strings before regex so a /pattern/ inside a string doesn't confuse us.
+      var stripped = line
+        .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+        .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+        .replace(/`(?:[^`\\]|\\.)*`/g, '``')
+        .replace(/\/(?:[^/\\\n]|\\.)+\/[gimsuy]*/g, '//');
+      // Count ? that look like ternary operators (not optional chaining ?. or nullish ??)
+      var ternaryCount = (stripped.match(/[^?.\s]\s*\?\s*[^?.]/g) || []).length;
       return ternaryCount >= 3;
     },
     fix: 'Replace nested ternaries with if/else or a lookup object.',

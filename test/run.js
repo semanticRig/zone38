@@ -1060,6 +1060,105 @@ var l05BlobCands = [
 var l05BlobResult = L05.preflight(l05BlobCands, null);
 assert(l05BlobResult.length === 1 && l05BlobResult[0].priority === 'blob', 'preflight classifies oversized values as blob');
 
+// --- L11 Cross-File Correlation ---
+section('L11 — Cross-file correlation');
+
+var L11 = require('../src/pipeline/L11-correlation.js');
+
+// Empty registry
+var l11Empty = L11.correlate([]);
+assert(l11Empty.duplicateSecrets.length === 0,  'L11: empty registry → no duplicate secrets');
+assert(l11Empty.slopClusters.length === 0,      'L11: empty registry → no slop clusters');
+assert(l11Empty.urlCrossRef.length === 0,        'L11: empty registry → no URL cross-refs');
+assert(l11Empty.clonePollutionMap.length === 0, 'L11: empty registry → no clone pollution');
+
+// Duplicate secrets: same value in 2 files
+var l11DupReg = [
+  { filePath: 'src/a.js', findings: [{ value: 'sk_live_abc123def456', lineIndex: 5, confidence: 'HIGH' }], patternHits: [], urlFindings: [] },
+  { filePath: 'src/b.js', findings: [{ value: 'sk_live_abc123def456', lineIndex: 10, confidence: 'HIGH' }], patternHits: [], urlFindings: [] },
+  { filePath: 'src/c.js', findings: [{ value: 'different_secret_xyz', lineIndex: 2, confidence: 'MEDIUM' }], patternHits: [], urlFindings: [] },
+];
+var l11DupResult = L11.correlate(l11DupReg);
+assert(l11DupResult.duplicateSecrets.length === 1, 'L11: one duplicate secret found across 2 files');
+assert(l11DupResult.duplicateSecrets[0].fileCount === 2, 'L11: duplicate secret appears in exactly 2 files');
+assert(l11DupResult.duplicateSecrets[0].value === 'sk_live_abc123def456', 'L11: correct secret value reported');
+
+// No duplicates when each secret is unique
+var l11NoDupReg = [
+  { filePath: 'src/a.js', findings: [{ value: 'unique_secret_aaa', lineIndex: 0, confidence: 'HIGH' }], patternHits: [], urlFindings: [] },
+  { filePath: 'src/b.js', findings: [{ value: 'unique_secret_bbb', lineIndex: 0, confidence: 'HIGH' }], patternHits: [], urlFindings: [] },
+];
+assert(L11.correlate(l11NoDupReg).duplicateSecrets.length === 0, 'L11: no duplicates when secrets are unique');
+
+// Slop clusters: 3 files in same dir with same dominant category
+var l11SlopReg = [
+  { relativePath: 'src/gen/a.js', findings: [], patternHits: [
+    { category: 'verbosity' }, { category: 'verbosity' }, { category: 'dead-code' },
+  ], urlFindings: [] },
+  { relativePath: 'src/gen/b.js', findings: [], patternHits: [
+    { category: 'verbosity' }, { category: 'verbosity' },
+  ], urlFindings: [] },
+  { relativePath: 'src/gen/c.js', findings: [], patternHits: [
+    { category: 'verbosity' }, { category: 'verbosity' }, { category: 'verbosity' },
+  ], urlFindings: [] },
+  { relativePath: 'src/other/d.js', findings: [], patternHits: [
+    { category: 'security' },
+  ], urlFindings: [] },
+];
+var l11SlopResult = L11.correlate(l11SlopReg);
+assert(l11SlopResult.slopClusters.length === 1, 'L11: one slop cluster detected');
+assert(l11SlopResult.slopClusters[0].category === 'verbosity', 'L11: cluster category is verbosity');
+assert(l11SlopResult.slopClusters[0].fileCount === 3, 'L11: cluster has 3 files');
+assert(l11SlopResult.slopClusters[0].directory === 'src/gen', 'L11: cluster directory is src/gen');
+
+// No cluster when only 2 files share a category
+var l11NoCluster = [
+  { relativePath: 'dir/a.js', findings: [], patternHits: [{ category: 'verbosity' }], urlFindings: [] },
+  { relativePath: 'dir/b.js', findings: [], patternHits: [{ category: 'verbosity' }], urlFindings: [] },
+];
+assert(L11.correlate(l11NoCluster).slopClusters.length === 0, 'L11: no cluster with only 2 files');
+
+// URL cross-references: same internal URL in 2 files
+var l11UrlReg = [
+  { filePath: 'src/a.js', findings: [], patternHits: [], urlFindings: [
+    { url: 'http://10.0.1.5/api/data', classification: 'internal-exposed' },
+  ] },
+  { filePath: 'src/b.js', findings: [], patternHits: [], urlFindings: [
+    { url: 'http://10.0.1.5/api/data', classification: 'internal-exposed' },
+  ] },
+  { filePath: 'src/c.js', findings: [], patternHits: [], urlFindings: [
+    { url: 'https://cdn.example.com/logo.png', classification: 'safe-external' },
+  ] },
+];
+var l11UrlResult = L11.correlate(l11UrlReg);
+assert(l11UrlResult.urlCrossRef.length === 1, 'L11: one internal URL cross-ref found');
+assert(l11UrlResult.urlCrossRef[0].fileCount === 2, 'L11: cross-ref appears in 2 files');
+assert(l11UrlResult.urlCrossRef[0].url === 'http://10.0.1.5/api/data', 'L11: correct URL in cross-ref');
+
+// No cross-ref for safe-external URLs
+assert(l11UrlResult.urlCrossRef.every(function (r) { return r.url !== 'https://cdn.example.com/logo.png'; }),
+       'L11: safe-external URLs not tracked in cross-refs');
+
+// Clone pollution: same function name in 2 files via clone-pollution hits
+var l11CloneReg = [
+  { filePath: 'src/a.js', findings: [], patternHits: [
+    { category: 'clone-pollution', line: 'function fetchUsers() {' },
+  ], urlFindings: [] },
+  { filePath: 'src/b.js', findings: [], patternHits: [
+    { category: 'clone-pollution', line: 'function fetchUsers() {' },
+  ], urlFindings: [] },
+];
+var l11CloneResult = L11.correlate(l11CloneReg);
+assert(l11CloneResult.clonePollutionMap.length === 1, 'L11: one clone pollution entry found');
+assert(l11CloneResult.clonePollutionMap[0].functionName === 'fetchusers', 'L11: correct function name (lowercased)');
+assert(l11CloneResult.clonePollutionMap[0].fileCount === 2, 'L11: clone appears in 2 files');
+
+// Output shape check
+assert(typeof l11Empty.duplicateSecrets === 'object' && Array.isArray(l11Empty.duplicateSecrets),  'L11: output has duplicateSecrets array');
+assert(typeof l11Empty.slopClusters     === 'object' && Array.isArray(l11Empty.slopClusters),      'L11: output has slopClusters array');
+assert(typeof l11Empty.urlCrossRef      === 'object' && Array.isArray(l11Empty.urlCrossRef),       'L11: output has urlCrossRef array');
+assert(typeof l11Empty.clonePollutionMap === 'object' && Array.isArray(l11Empty.clonePollutionMap),'L11: output has clonePollutionMap array');
+
 // --- L10 Pattern Rule Engine ---
 section('L10 — Pattern rule engine');
 

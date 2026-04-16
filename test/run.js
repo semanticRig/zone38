@@ -776,6 +776,118 @@ assert(typeof l03Standalone.selfRatio === 'number', 'standalone analyseFile retu
 var l03RepResult = L03.analyseFile(null, l03RepContent);
 assert(l03RepResult.compressionScore >= l03Result.compressionScore, 'repetitive.js compression score >= clean.js (' + l03RepResult.compressionScore + ' >= ' + l03Result.compressionScore + ')');
 
+// --- L04 Entity Harvesting ---
+section('L04 Entity Harvesting');
+
+var L04 = require('../src/pipeline/L04-harvest.js');
+
+// String extraction: basic single and double quoted
+var l04Line1 = "var DB_HOST = 'db.prod.internal';";
+var l04Strings1 = L04._extractStringsFromLine(l04Line1, 0);
+assert(l04Strings1.length >= 1, 'extractStringsFromLine finds single-quoted string');
+assert(l04Strings1[0].value === 'db.prod.internal', 'extracted value matches');
+assert(l04Strings1[0].identifierName === 'DB_HOST', 'extracted identifierName matches');
+assert(l04Strings1[0].lineIndex === 0, 'lineIndex is 0');
+assert(l04Strings1[0].type === 'string', 'type is string');
+
+// String extraction: double-quoted
+var l04Line2 = 'var region = "us-east-1";';
+var l04Strings2 = L04._extractStringsFromLine(l04Line2, 5);
+assert(l04Strings2.length >= 1, 'extractStringsFromLine finds double-quoted string');
+assert(l04Strings2[0].lineIndex === 5, 'lineIndex is 5');
+
+// URL extraction: extracts https URL
+var l04LineUrl = 'var endpoint = "https://api.example.com/v2/data";';
+var l04Urls = L04._extractUrlsFromLine(l04LineUrl, 2);
+assert(l04Urls.length >= 1, 'extractUrlsFromLine finds URL');
+assert(l04Urls[0].type === 'url', 'URL candidate has type url');
+assert(l04Urls[0].value.indexOf('https://') === 0, 'URL value starts with https://');
+
+// URL extraction: skips comment-only lines
+var l04LineComment = '// see https://docs.example.com for details';
+var l04CommentUrls = L04._extractUrlsFromLine(l04LineComment, 0);
+assert(l04CommentUrls.length === 0, 'URL extraction skips comment lines');
+
+// Short strings below MIN_LEN are dropped
+var l04ShortLine = "var x = 'ab';";
+var l04Short = L04._extractStringsFromLine(l04ShortLine, 0);
+assert(l04Short.length === 0, 'strings < 4 chars are discarded');
+
+// Gravity Welder: non-adjacent items are not fused
+var l04Cands = [
+  { value: 'hello', line: 'hello', col: 0, lineIndex: 0, identifierName: null, callSiteContext: null, type: 'string', priority: 'normal' },
+  { value: 'world', line: 'world', col: 0, lineIndex: 5, identifierName: null, callSiteContext: null, type: 'string', priority: 'normal' },
+];
+var l04Welded = L04._gravityWeld(l04Cands);
+assert(l04Welded.length === 2, 'gravity weld: non-adjacent candidates not fused (lineDelta > 1)');
+
+// harvestEntities: fixture produces candidates and mutates record
+var l04FixtureContent = require('fs').readFileSync(path.join(fixturesDir, 'harvest-config.js'), 'utf8');
+var l04Record = { candidates: null };
+var l04Candidates = L04.harvestEntities(l04FixtureContent, l04Record);
+assert(Array.isArray(l04Candidates), 'harvestEntities returns array');
+assert(l04Candidates.length > 0, 'fixture produces at least one candidate (got ' + l04Candidates.length + ')');
+assert(l04Record.candidates === l04Candidates, 'harvestEntities mutates fileRecord.candidates');
+
+// harvestEntities with null record (standalone call)
+var l04Standalone = L04.harvestEntities(l04FixtureContent, null);
+assert(Array.isArray(l04Standalone), 'harvestEntities standalone returns array');
+
+// --- L05 Pre-Flight Gate ---
+section('L05 Pre-Flight Gate');
+
+var L05 = require('../src/pipeline/L05-preflight.js');
+
+// lineRoutingDensity: high symbol density line
+var l05Dense = '};(){[]}<>';
+assert(L05._lineRoutingDensity(l05Dense) > 0.35, 'dense symbol line has routing density > 0.35');
+
+// lineRoutingDensity: plain text line
+var l05Plain = 'var host = "db.prod.internal";';
+assert(L05._lineRoutingDensity(l05Plain) < 0.35, 'plain text line has routing density < 0.35');
+
+// classTransitionCount: token with many transitions
+var l05Transitions = L05._classTransitionCount('ghp_ABCDEF123');
+assert(l05Transitions >= 3, 'token with mixed chars has >= 3 transitions');
+
+// classTransitionCount: uniform lowercase
+var l05Uniform = L05._classTransitionCount('abcdefgh');
+assert(l05Uniform === 0, 'uniform lowercase has 0 transitions');
+
+// hash: same string same hash
+assert(L05._hash('hello') === L05._hash('hello'), 'hash is deterministic');
+assert(L05._hash('hello') !== L05._hash('world'), 'different strings have different hashes');
+
+// preflight: discards duplicate values
+var l05DupCands = [
+  { value: 'secret-value-abc', line: 'var x = "secret-value-abc"', col: 0, lineIndex: 0, type: 'string', priority: 'normal' },
+  { value: 'secret-value-abc', line: 'var y = "secret-value-abc"', col: 0, lineIndex: 1, type: 'string', priority: 'normal' },
+];
+var l05Deduped = L05.preflight(l05DupCands, null);
+assert(l05Deduped.length === 1, 'preflight deduplicates identical values');
+
+// preflight: discards logic-graph lines
+var l05StructuralCands = [
+  { value: 'something-long', line: '};(){[]}<>;(){', col: 0, lineIndex: 0, type: 'string', priority: 'normal' },
+];
+var l05Filtered = L05.preflight(l05StructuralCands, null);
+assert(l05Filtered.length === 0, 'preflight discards candidates from high-density structural lines');
+
+// preflight: keeps normal candidates
+var l05NormalCands = [
+  { value: 'db.prod.internal', line: 'var DB_HOST = "db.prod.internal"', col: 0, lineIndex: 0, type: 'string', priority: 'normal' },
+];
+var l05Kept = L05.preflight(l05NormalCands, null);
+assert(l05Kept.length === 1, 'preflight keeps normal candidates');
+
+// preflight: marks blobs
+var l05BlobValue = 'x'.repeat(2001);
+var l05BlobCands = [
+  { value: l05BlobValue, line: 'var x = "' + l05BlobValue.slice(0, 5) + '"', col: 0, lineIndex: 0, type: 'string', priority: 'normal' },
+];
+var l05BlobResult = L05.preflight(l05BlobCands, null);
+assert(l05BlobResult.length === 1 && l05BlobResult[0].priority === 'blob', 'preflight classifies oversized values as blob');
+
 // --- Vector worker ---
 section('Vector worker (batch)');
 

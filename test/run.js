@@ -1082,6 +1082,33 @@ var l05BlobCands = [
 var l05BlobResult = L05.preflight(l05BlobCands, null);
 assert(l05BlobResult.length === 1 && l05BlobResult[0].priority === 'blob', 'preflight classifies oversized values as blob');
 
+// _isStyleLiteral: detects semicolon-delimited key=value style strings
+assert(L05._isStyleLiteral('fillColor=#03B5BB;gradientColor=none;') === true, 'CSS-like style string is style literal');
+assert(L05._isStyleLiteral('dashed=0;html=1;shape=mxgraph.aws2.analytics') === true, 'SVG style attributes are style literal');
+assert(L05._isStyleLiteral('rounded=1;whiteSpace=wrap;html=1;arcSize=50;') === true, 'draw.io style string is style literal');
+assert(L05._isStyleLiteral('strokeColor=#f69721;fillColor=none;gradientColor=none;') === true, 'color style string is style literal');
+assert(L05._isStyleLiteral('ghp_ABCDEFghijkl1234567890abcdef') === false, 'GitHub PAT is NOT style literal');
+assert(L05._isStyleLiteral('sk-proj-abcdef1234567890') === false, 'API key is NOT style literal');
+assert(L05._isStyleLiteral('hello world') === false, 'plain text is NOT style literal');
+assert(L05._isStyleLiteral('a=b') === false, 'single k=v with no semicolons is NOT style literal');
+assert(L05._isStyleLiteral('just;semicolons;here') === false, 'semicolons without = are NOT style literal');
+
+// preflight: discards style-literal strings
+var l05StyleCands = [
+  { value: 'fillColor=#03B5BB;gradientColor=none;', line: 'var s = "fillColor=#03B5BB;gradientColor=none;"', col: 0, lineIndex: 0, type: 'string', priority: 'normal' },
+  { value: 'ghp_ABCDEFghijkl1234567890ab', line: 'var token = "ghp_ABCDEFghijkl1234567890ab"', col: 0, lineIndex: 1, type: 'string', priority: 'normal' },
+];
+var l05StyleResult = L05.preflight(l05StyleCands, null);
+assert(l05StyleResult.length === 1, 'preflight discards style literal, keeps real token (got ' + l05StyleResult.length + ')');
+assert(l05StyleResult[0].value.indexOf('ghp_') === 0, 'kept candidate is the real token, not the style string');
+
+// preflight: does not discard url-type candidates that look like style strings
+var l05UrlStyleCands = [
+  { value: 'fillColor=#03B5BB;gradientColor=none;', line: 'var s = "fillColor=#03B5BB;gradientColor=none;"', col: 0, lineIndex: 0, type: 'url', priority: 'normal' },
+];
+var l05UrlStyleResult = L05.preflight(l05UrlStyleCands, null);
+assert(l05UrlStyleResult.length === 1, 'preflight keeps url-type candidates even if they look like style strings');
+
 // --- L12 Project-Level Calibration ---
 section('L12 — Project-level calibration');
 

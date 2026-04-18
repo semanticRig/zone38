@@ -553,6 +553,8 @@ var rules = [
       if (trimmed.startsWith('//') || trimmed.startsWith('*')) return false;
       // Skip const/UPPER_SNAKE definitions — those are acceptable constant declarations
       if (/^\s*(?:const|var|let)\s+[A-Z_]+\s*=/.test(line)) return false;
+      // Skip idiomatic position args in string/array methods — 0, 1, offsets are semantic, not magic
+      if (/\b(?:indexOf|lastIndexOf|slice|substring|substr)\s*\(/.test(line)) return false;
       // Number used in a comparison or arithmetic context
       return /[><=!+\-*/%]\s*\d{4,}\b/.test(line) || /\b\d{4,}\s*[><=!+\-*/%]/.test(line);
     },

@@ -56,19 +56,30 @@ function _processFile(record, corpusDir) {
 
   var candidates = record.candidates || [];
 
+  // Extract URL candidates before L05 preflight — L05's hash deduplication is
+  // type-agnostic, so a url-type candidate would be silently dropped if a string-type
+  // candidate with the same value appeared earlier in the L04 output (which it always
+  // does). URL candidates bypass the string preflight entirely; they go straight to L09.
+  var urlCandidates = [];
+  var nonUrlCandidates = [];
+  for (var pi = 0; pi < candidates.length; pi++) {
+    if (candidates[pi].type === 'url') {
+      urlCandidates.push(candidates[pi]);
+    } else {
+      nonUrlCandidates.push(candidates[pi]);
+    }
+  }
+  candidates = nonUrlCandidates;
+
   // Minified file guard — L04 already ran so URL harvesting is captured.
   // For minified files, skip the string-candidate pipeline (L05-L08) entirely
   // to prevent 30+ false REVIEW/SECRETS items from a single minified bundle line.
   // URL candidates still flow to L09; pattern rules still run on raw content in L10.
   if (record.surface && record.surface.minified) {
-    var minifiedUrls = [];
-    for (var mi = 0; mi < candidates.length; mi++) {
-      if (candidates[mi].type === 'url') minifiedUrls.push(candidates[mi]);
-    }
     record.candidates  = [];
     record.findings    = [];
     record.review      = [];
-    record.urlFindings = L09.analyseUrls(minifiedUrls);
+    record.urlFindings = L09.analyseUrls(urlCandidates);
     record.patternHits = L10.applyRules(content, record);
     return;
   }
@@ -77,13 +88,10 @@ function _processFile(record, corpusDir) {
   candidates = L05.preflight(candidates, record);
   record.candidates = candidates;
 
-  // Separate URL candidates for L09
-  var urlCandidates = [];
+  // Separate string candidates for L06-L08 (blobs excluded; urls already split above)
   var stringCandidates = [];
   for (var i = 0; i < candidates.length; i++) {
-    if (candidates[i].type === 'url') {
-      urlCandidates.push(candidates[i]);
-    } else if (candidates[i].priority !== 'blob') {
+    if (candidates[i].priority !== 'blob') {
       stringCandidates.push(candidates[i]);
     }
   }

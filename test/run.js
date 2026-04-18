@@ -1836,6 +1836,9 @@ var rMagic = findRule('magic-values');
 assert(rMagic.test('if (timeout > 30000) throw new Error();', {}), 'magic-values: fires on > 30000');
 assert(!rMagic.test('const TIMEOUT_MS = 30000;', {}), 'magic-values: does not fire on UPPER_SNAKE constant');
 assert(!rMagic.test('var x = 42;', {}), 'magic-values: does not fire on small 2-digit number');
+assert(!rMagic.test("var end = str.slice(pos, pos + 1024);", {}), 'magic-values: does not fire on offset in slice()');
+assert(!rMagic.test("if (href.lastIndexOf('/', 1000) !== -1) {", {}), 'magic-values: does not fire on offset in lastIndexOf()');
+assert(!rMagic.test("return s.substring(start, start + 4096);", {}), 'magic-values: does not fire on offset in substring()');
 
 // import-hygiene: namespace import
 var rImport = findRule('import-hygiene');

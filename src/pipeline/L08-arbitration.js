@@ -11,10 +11,12 @@
 //   - Uniformity filter (frequency-distribution test)
 //
 // Confidence tiers (must match across ALL calls to this function):
-//   HIGH:      pipelineScore >= 0.65 AND at least 2 other signals fire   → findings
-//   MEDIUM:    pipelineScore >= 0.50 AND at least 1 other signal fires   → findings
-//   UNCERTAIN: pipelineScore >= 0.40 OR any single signal fires alone    → review
-//   SAFE:      none of the above                                          → discarded
+//   HIGH:      effectivePipeline >= 0.65 AND at least 2 other signals fire  → findings
+//   MEDIUM:    effectivePipeline >= 0.50 AND at least 2 other signals fire  → findings
+//   UNCERTAIN: pipelineScore >= 0.40 OR any single signal fires alone       → review
+//   SAFE:      none of the above                                             → discarded
+//   effectivePipeline = pipelineScore × lengthMultiplier(valueLen), decaying
+//   from 1.0 at len=12 to 0.0 at len=6. UNCERTAIN always uses raw pipelineScore.
 //
 // Finding shape:
 //   { value, line, lineIndex, identifierName, callSiteContext, type,
@@ -40,6 +42,18 @@ function _countOtherSignals(signals) {
   if (signals.egsSpike)   count++;
   if (signals.uniformity) count++;
   return count;
+}
+
+// Length-asymptote multiplier — graduated decay from len=12 to len=6.
+// At len >= 12: multiplier = 1.0 (no decay).
+// At len =  9:  multiplier = 0.5.
+// At len =  6:  multiplier = 0.0 — CONFIRMED tiers unreachable.
+// Applied to pipeline score before HIGH/MEDIUM threshold checks only.
+// UNCERTAIN always uses raw pipeline score so short candidates still surface for review.
+function _lengthMultiplier(len) {
+  if (len >= 12) return 1;
+  if (len <= 6)  return 0;
+  return (len - 6) / 6;
 }
 
 function arbitrate(signalSets) {
@@ -95,10 +109,15 @@ function arbitrate(signalSets) {
       compressionSignal: compressionSignal,
     };
 
-    if (pipeline >= HIGH_PIPELINE && others >= 2) {
+    // Length-asymptote gate: decay effective pipeline score for short strings.
+    // UNCERTAIN uses raw pipeline so short candidates are never silently dropped.
+    var valueLength = cand.value ? cand.value.length : 0;
+    var effectivePipeline = pipeline * _lengthMultiplier(valueLength);
+
+    if (effectivePipeline >= HIGH_PIPELINE && others >= 2) {
       finding.confidence = 'HIGH';
       findings.push(finding);
-    } else if (pipeline >= MEDIUM_PIPELINE && others >= 1) {
+    } else if (effectivePipeline >= MEDIUM_PIPELINE && others >= 2) {
       finding.confidence = 'MEDIUM';
       findings.push(finding);
     } else if (pipeline >= UNCERTAIN_FLOOR || others >= 1) {
@@ -114,7 +133,8 @@ function arbitrate(signalSets) {
 module.exports = {
   arbitrate: arbitrate,
   // Exported for tests
-  HIGH_PIPELINE:   HIGH_PIPELINE,
-  MEDIUM_PIPELINE: MEDIUM_PIPELINE,
-  UNCERTAIN_FLOOR: UNCERTAIN_FLOOR,
+  HIGH_PIPELINE:     HIGH_PIPELINE,
+  MEDIUM_PIPELINE:   MEDIUM_PIPELINE,
+  UNCERTAIN_FLOOR:   UNCERTAIN_FLOOR,
+  _lengthMultiplier: _lengthMultiplier,
 };

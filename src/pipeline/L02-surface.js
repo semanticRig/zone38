@@ -107,17 +107,22 @@ function characteriseFile(content) {
     ? lines.slice(0, lines.length - 1)
     : lines;
 
-  // Minified: effectively one content line AND total length > 500
-  var minified = effectiveLines.length === 1 && content.length > 500;
+  // Average line length — computed before minified detection so the multi-line
+  // minified check (case 2 below) can use it directly.
+  var nonEmpty = effectiveLines.filter(function (l) { return l.trim().length > 0; });
+  var avgLineLength = nonEmpty.length === 0 ? 0 :
+    nonEmpty.reduce(function (sum, l) { return sum + l.length; }, 0) / nonEmpty.length;
+
+  // Minified detection — two cases:
+  //   1. Classic single-line: one content line with total length > 500.
+  //   2. Multi-line minified: <=10 lines but avgLineLength >= 200 chars — catches
+  //      bundles split across a handful of very long lines by a bundler.
+  var minified = (effectiveLines.length === 1 && content.length > 500) ||
+                 (effectiveLines.length <= 10 && avgLineLength >= 200);
 
   // Routing density: structural symbols / total chars
   var routingCount = countSetChars(content, ROUTING_CHARS);
   var routingDensity = routingCount / totalChars;
-
-  // Average line length (excluding empty lines from the average)
-  var nonEmpty = effectiveLines.filter(function (l) { return l.trim().length > 0; });
-  var avgLineLength = nonEmpty.length === 0 ? 0 :
-    nonEmpty.reduce(function (sum, l) { return sum + l.length; }, 0) / nonEmpty.length;
 
   // Line length distribution: buckets [0-40], [41-80], [81-120], [121+]
   var buckets = [0, 0, 0, 0];

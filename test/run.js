@@ -2103,10 +2103,15 @@ assert(l08High.findings.length === 1, 'L08: HIGH confidence → goes to findings
 assert(l08High.findings[0].confidence === 'HIGH', 'L08: confidence tier is HIGH');
 assert(l08High.review.length === 0, 'L08: HIGH has no review items');
 
-// MEDIUM: pipeline >= 0.50 AND exactly 1 other signal
-var l08Med = L08.arbitrate([makeSignalSet(0.55, true, false, false, false)]);
+// MEDIUM: pipeline >= 0.50 AND >= 2 other signals (Fix 4: raised from 1 to 2)
+var l08Med = L08.arbitrate([makeSignalSet(0.55, true, true, false, false)]);
 assert(l08Med.findings.length === 1, 'L08: MEDIUM confidence → goes to findings');
 assert(l08Med.findings[0].confidence === 'MEDIUM', 'L08: confidence tier is MEDIUM');
+
+// Fix 4 regression: pipeline >= 0.50 with only 1 other signal → REVIEW, not MEDIUM
+var l08MedSingle = L08.arbitrate([makeSignalSet(0.55, true, false, false, false)]);
+assert(l08MedSingle.findings.length === 0, 'L08: single-signal MEDIUM → NOT in findings');
+assert(l08MedSingle.review.length === 1,   'L08: single-signal MEDIUM → goes to review');
 
 // UNCERTAIN: pipeline >= 0.40 but no other signals
 var l08Uncertain = L08.arbitrate([makeSignalSet(0.42, false, false, false, false)]);

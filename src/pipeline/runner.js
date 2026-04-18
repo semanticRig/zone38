@@ -56,6 +56,23 @@ function _processFile(record, corpusDir) {
 
   var candidates = record.candidates || [];
 
+  // Minified file guard — L04 already ran so URL harvesting is captured.
+  // For minified files, skip the string-candidate pipeline (L05-L08) entirely
+  // to prevent 30+ false REVIEW/SECRETS items from a single minified bundle line.
+  // URL candidates still flow to L09; pattern rules still run on raw content in L10.
+  if (record.surface && record.surface.minified) {
+    var minifiedUrls = [];
+    for (var mi = 0; mi < candidates.length; mi++) {
+      if (candidates[mi].type === 'url') minifiedUrls.push(candidates[mi]);
+    }
+    record.candidates  = [];
+    record.findings    = [];
+    record.review      = [];
+    record.urlFindings = L09.analyseUrls(minifiedUrls);
+    record.patternHits = L10.applyRules(content, record);
+    return;
+  }
+
   // L05 — Preflight (filter/prioritise candidates)
   candidates = L05.preflight(candidates, record);
   record.candidates = candidates;

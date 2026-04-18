@@ -4,9 +4,11 @@
 // Applies fast discard/downgrade logic before expensive deep analysis.
 // Rules (in order):
 //   1. Logic-graph discard: line routing density > 0.35 → discard (code structure, not data)
-//   2. Blob classification: value.length > BLOB_THRESHOLD → classify as blob, lower priority
-//   3. Length bounds: value.length < MIN_LEN AND no class-transition friction → downgrade
-//   4. Rolling hash deduplication: exact duplicates discarded after first occurrence
+//   2. Style-literal discard: CSS/SVG key=value semicolon strings → discard
+//   3. Entanglement filter: high symbol density in window before string → downgrade to low
+//   4. Blob classification: value.length > BLOB_THRESHOLD → classify as blob, lower priority
+//   5. Length bounds: value.length < MIN_LEN AND no class-transition friction → downgrade
+//   6. Rolling hash deduplication: exact duplicates discarded after first occurrence
 // Output: clean, deduplicated, high-value candidate list (mutates fileRecord.candidates)
 
 var MIN_LEN = 4;
@@ -76,6 +78,27 @@ function _hash(str) {
   return h;
 }
 
+// Symbol density in a left-biased window around the string's position in the source line.
+// c.col is the start index of the opening quote; entanglement context (operators, function
+// calls, regex syntax) almost always precedes the string, so the window is 40 chars before
+// and 10 chars after c.col, clamped to line bounds.
+// High density means the string is syntactically entangled, not an isolated assignment.
+var ENTANGLEMENT_DENSITY_THRESHOLD = 0.35;
+var ENTANGLEMENT_SYMBOL_CHARS = '/\\^$.*+?()[\\]{}|<>=!,;:@#%&~';
+
+function _symbolDensityInWindow(line, col) {
+  if (!line || typeof col !== 'number') return 0;
+  var start = Math.max(0, col - 40);
+  var end   = Math.min(line.length, col + 10);
+  if (end <= start) return 0;
+  var win   = line.slice(start, end);
+  var count = 0;
+  for (var i = 0; i < win.length; i++) {
+    if (ENTANGLEMENT_SYMBOL_CHARS.indexOf(win[i]) !== -1) count++;
+  }
+  return count / win.length;
+}
+
 function preflight(candidates, _fileRecord) {
   var seen = {};
   var result = [];
@@ -92,20 +115,28 @@ function preflight(candidates, _fileRecord) {
     //    CSS/SVG/config style strings, not secrets (eliminates draw.io-style FPs)
     if ((c.type === 'string' || c.type === 'kv') && _isStyleLiteral(value)) continue;
 
-    // 3. Blob classification: extremely long values are unlikely to be secrets;
+    // 3. Entanglement filter: high symbol density in the left-biased window before
+    //    this string means it is syntactically entangled — a regex operand, format
+    //    argument, or template fragment — not an isolated credential assignment.
+    //    Downgrade to 'low' rather than discard so pattern analysis still runs.
+    if (c.type !== 'url' && _symbolDensityInWindow(c.line, c.col) > ENTANGLEMENT_DENSITY_THRESHOLD) {
+      c.priority = 'low';
+    }
+
+    // 4. Blob classification: extremely long values are unlikely to be secrets;
     //    lower their priority but keep them for URL/pattern analysis
     if (value.length > BLOB_THRESHOLD) {
       c.priority = 'blob';
     }
 
-    // 4. Length + friction gate: very short values with no class transitions
+    // 5. Length + friction gate: very short values with no class transitions
     //    are almost certainly identifiers or config labels — skip
     if (value.length < MIN_LEN) continue;
     if (value.length < 8 && _classTransitionCount(value) === 0) {
       c.priority = 'low';
     }
 
-    // 5. Rolling hash deduplication: keep only the first occurrence of each value
+    // 6. Rolling hash deduplication: keep only the first occurrence of each value
     var h = _hash(value);
     if (seen[h]) continue;
     seen[h] = true;
@@ -119,8 +150,9 @@ function preflight(candidates, _fileRecord) {
 module.exports = {
   preflight: preflight,
   // Exported for tests
-  _lineRoutingDensity: _lineRoutingDensity,
-  _classTransitionCount: _classTransitionCount,
-  _isStyleLiteral: _isStyleLiteral,
-  _hash: _hash,
+  _lineRoutingDensity:    _lineRoutingDensity,
+  _classTransitionCount:  _classTransitionCount,
+  _isStyleLiteral:        _isStyleLiteral,
+  _hash:                  _hash,
+  _symbolDensityInWindow: _symbolDensityInWindow,
 };

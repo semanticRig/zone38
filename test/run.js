@@ -1120,6 +1120,91 @@ var triageAllLowOut = L15.renderCli(triageAllLowReport, { targetPath: '/tmp/test
 assert(triageAllLowOut.indexOf('0 uncertain') !== -1, 'triage all-low default: header shows 0');
 assert(triageAllLowOut.indexOf('2 low-confidence') !== -1, 'triage all-low default: 2 items hidden');
 
+// --- Pattern hits visual redesign ---
+section('L15 — Pattern hits visual');
+
+// Build test fixture with multiple categories and severities
+var phVisReport = {
+  projectSummary: {
+    axes: { A: 30, B: 15, C: 10 },
+    verdicts: { A: 'Some issues', B: 'Minimal', C: 'Minimal' },
+    fileCount: 1,
+    totalLines: 80,
+  },
+  perFile: [{ path: 'demo.js', axes: { A: 30, B: 15, C: 10 }, breakdown: {}, lineCount: 80, roleWeight: 1 }],
+  secrets: [], exposure: [], review: [], slopBreakdown: [], cleanFiles: [],
+  patternHits: [
+    { ruleId: 'empty-catch', ruleName: 'Empty catch', category: 'error-handling', severity: 8, file: 'demo.js', line: 4, source: 'catch(e) {}', fix: 'Handle error' },
+    { ruleId: 'console-log', ruleName: 'Console log', category: 'debug-pollution', severity: 5, file: 'demo.js', line: 10, source: 'console.log("debug")', fix: 'Remove debug log' },
+    { ruleId: 'dead-require', ruleName: 'Dead require', category: 'dead-code', severity: 4, file: 'demo.js', line: 1, source: "const x = require('unused')", fix: 'Remove unused import' },
+    { ruleId: 'hardcoded-secret', ruleName: 'Hardcoded secret', category: 'security', severity: 9, file: 'demo.js', line: 20, source: "const key = 'sk-abc123...'", fix: 'Use env variable' },
+    { ruleId: 'todo-comment', ruleName: 'TODO comment', category: 'debug-pollution', severity: 3, file: 'demo.js', line: 30, source: '// TODO: fix later', fix: 'Resolve or track in issue' },
+  ],
+};
+
+var phVisOut = L15.renderCli(phVisReport, { verbose: true, targetPath: '/tmp/test', thresholds: L15.DEFAULT_THRESHOLDS });
+
+// Header present
+assert(phVisOut.indexOf('PATTERN HITS') !== -1, 'ph-visual: header present');
+assert(phVisOut.indexOf('(5)') !== -1, 'ph-visual: shows hit count');
+
+// Category group labels present (grouped by first-occurrence order)
+assert(phVisOut.indexOf('error-handling') !== -1, 'ph-visual: error-handling group');
+assert(phVisOut.indexOf('debug-pollution') !== -1, 'ph-visual: debug-pollution group');
+assert(phVisOut.indexOf('dead-code') !== -1, 'ph-visual: dead-code group');
+assert(phVisOut.indexOf('security') !== -1, 'ph-visual: security group');
+
+// Severity-coloured line numbers (check lineTag format)
+assert(phVisOut.indexOf('L5') !== -1, 'ph-visual: L5 (line 4+1) for empty-catch');
+assert(phVisOut.indexOf('L11') !== -1, 'ph-visual: L11 for console-log');
+assert(phVisOut.indexOf('L21') !== -1, 'ph-visual: L21 for hardcoded-secret');
+
+// Rule badges present
+assert(phVisOut.indexOf('[empty-catch]') !== -1, 'ph-visual: empty-catch badge');
+assert(phVisOut.indexOf('[console-log]') !== -1, 'ph-visual: console-log badge');
+assert(phVisOut.indexOf('[hardcoded-secret]') !== -1, 'ph-visual: hardcoded-secret badge');
+
+// Fix suggestions present (→ arrow)
+assert(phVisOut.indexOf('\u2192') !== -1, 'ph-visual: fix arrow present');
+assert(phVisOut.indexOf('Handle error') !== -1, 'ph-visual: fix text for empty-catch');
+assert(phVisOut.indexOf('Use env variable') !== -1, 'ph-visual: fix text for hardcoded-secret');
+
+// Source snippets present
+assert(phVisOut.indexOf('catch') !== -1, 'ph-visual: source snippet for empty-catch');
+assert(phVisOut.indexOf('console') !== -1, 'ph-visual: source snippet for console-log');
+
+// Group separator (─ dashes)
+assert(phVisOut.indexOf('\u2500\u2500') !== -1, 'ph-visual: category separator dashes');
+
+// fileFilter in multi-file mode narrows results
+var phVisFilterReport = {
+  projectSummary: {
+    axes: { A: 30, B: 15, C: 10 },
+    verdicts: { A: 'Some issues', B: 'Minimal', C: 'Minimal' },
+    fileCount: 2,
+    totalLines: 160,
+  },
+  perFile: [
+    { path: 'demo.js', axes: { A: 30, B: 15, C: 10 }, breakdown: {}, lineCount: 80, roleWeight: 1 },
+    { path: 'other.js', axes: { A: 5, B: 0, C: 0 }, breakdown: {}, lineCount: 80, roleWeight: 1 },
+  ],
+  secrets: [], exposure: [], review: [], slopBreakdown: [], cleanFiles: [],
+  patternHits: [
+    { ruleId: 'empty-catch', ruleName: 'Empty catch', category: 'error-handling', severity: 8, file: 'demo.js', line: 4, source: 'catch(e) {}', fix: 'Handle error' },
+  ],
+};
+var phVisFiltered = L15.renderCli(phVisFilterReport, { verbose: true, file: 'nonexistent.js', targetPath: '/tmp/test', thresholds: L15.DEFAULT_THRESHOLDS });
+assert(phVisFiltered.indexOf('PATTERN HITS') === -1, 'ph-visual: fileFilter hides unmatched hits');
+
+// Empty hits → no section
+var phVisEmpty = {
+  projectSummary: { axes: { A: 0, B: 0, C: 0 }, verdicts: { A: 'Clean', B: 'Clean', C: 'Clean' }, fileCount: 1, totalLines: 10 },
+  perFile: [{ path: 'ok.js', axes: { A: 0, B: 0, C: 0 }, breakdown: {}, lineCount: 10, roleWeight: 1 }],
+  secrets: [], exposure: [], patternHits: [], slopBreakdown: [], review: [], cleanFiles: [],
+};
+var phVisEmptyOut = L15.renderCli(phVisEmpty, { verbose: true, targetPath: '/tmp/test', thresholds: L15.DEFAULT_THRESHOLDS });
+assert(phVisEmptyOut.indexOf('PATTERN HITS') === -1, 'ph-visual: empty hits → no section');
+
 // --- Pipeline Runner integration ---
 section('Pipeline Runner');
 

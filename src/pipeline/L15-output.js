@@ -5,13 +5,102 @@
 // Two distinct CLI modes: single-file (full detail) and directory (summary + gated detail).
 
 // ---------------------------------------------------------------------------
-// ANSI — exactly four colour states, nothing else
+// ANSI palette — single source for all colour codes
 // ---------------------------------------------------------------------------
 var RESET  = '\x1b[0m';
-var BOLD   = '\x1b[1m';    // section headers (bright white)
-var DIM    = '\x1b[2m';    // clean / pass / structural
-var YELLOW = '\x1b[33m';   // warning
-var RED    = '\x1b[31m';   // critical
+var BOLD   = '\x1b[1m';
+var DIM    = '\x1b[2m';
+var RED    = '\x1b[31m';
+var GREEN  = '\x1b[32m';
+var YELLOW = '\x1b[33m';
+var CYAN   = '\x1b[36m';
+var GRAY   = '\x1b[90m';
+
+// ---------------------------------------------------------------------------
+// Severity → colour (for pattern hit line numbers)
+// ---------------------------------------------------------------------------
+function _severityColor(sev) {
+  if (sev >= 9) return RED;
+  if (sev >= 7) return YELLOW;
+  if (sev >= 5) return CYAN;
+  return GRAY;
+}
+
+// ---------------------------------------------------------------------------
+// Category → colour (for pattern hit badges)
+// ---------------------------------------------------------------------------
+var CATEGORY_COLOR = {
+  // Critical — red
+  'security':          RED,
+  'config-exposure':   RED,
+  'slopsquatting':     RED,
+  'error-handling':    RED,
+  // Warning — yellow
+  'debug-pollution':   YELLOW,
+  'context-confusion': YELLOW,
+  'structure-smell':   YELLOW,
+  'complexity-spike':  YELLOW,
+  'magic-values':      YELLOW,
+  'comment-mismatch':  YELLOW,
+  'scaffold-residue':  YELLOW,
+  'promise-graveyard': YELLOW,
+  'async-abuse':       YELLOW,
+  // Quality — cyan
+  'dead-code':         CYAN,
+  'over-engineering':  CYAN,
+  'dependency':        CYAN,
+  'import-hygiene':    CYAN,
+  'clone-pollution':   CYAN,
+  'accessor-bloat':    CYAN,
+  'interface-bloat':   CYAN,
+  'branch-symmetry':   CYAN,
+  'type-theater':      CYAN,
+  'test-theater':      CYAN,
+  'naming-entropy':    CYAN,
+  // Low — gray
+  'verbosity':         GRAY,
+};
+
+function _categoryColor(cat) {
+  return CATEGORY_COLOR[cat] || YELLOW;
+}
+
+// ---------------------------------------------------------------------------
+// Minimal syntax highlighter for code snippets
+// ---------------------------------------------------------------------------
+var _KW_RE = /\b(var|let|const|function|return|if|else|new|this|class|import|require|async|await|throw|typeof|instanceof)\b/g;
+var _STR_RE = /('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/g;
+
+function _highlight(line) {
+  if (!line || typeof line !== 'string') return '';
+  var commentIdx = line.indexOf('//');
+  var code = commentIdx !== -1 ? line.slice(0, commentIdx) : line;
+  var comment = commentIdx !== -1 ? line.slice(commentIdx) : '';
+
+  code = code.replace(_STR_RE, function (m) { return GREEN + m + RESET; });
+  code = code.replace(_KW_RE, function (m) { return CYAN + m + RESET; });
+
+  if (comment) code += GRAY + comment + RESET;
+  return code;
+}
+
+// ---------------------------------------------------------------------------
+// Group pattern hits by category (preserves order of first occurrence)
+// ---------------------------------------------------------------------------
+function _groupByCategory(hits) {
+  var order = [];
+  var map = {};
+  for (var i = 0; i < hits.length; i++) {
+    var cat = hits[i].category || 'unknown';
+    if (!map[cat]) { map[cat] = []; order.push(cat); }
+    map[cat].push(hits[i]);
+  }
+  var groups = [];
+  for (var g = 0; g < order.length; g++) {
+    groups.push({ category: order[g], hits: map[order[g]] });
+  }
+  return groups;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -185,17 +274,42 @@ function _renderPatternHits(hits, fileFilter) {
 
   var lines = [];
   lines.push('');
-  lines.push(BOLD + 'PATTERN HITS' + RESET + '  (' + filtered.length + ')');
+  lines.push(BOLD + 'PATTERN HITS' + RESET + '  ' + DIM + '(' + filtered.length + ')' + RESET);
   lines.push('');
-  for (var i = 0; i < filtered.length; i++) {
-    var ph = filtered[i];
-    var lineNum = _padLeft('L' + (ph.line + 1), 6);
-    var ruleCol = Math.max(ph.ruleId.length + 1, 24);
-    var ruleLabel = _padRight(ph.ruleId, ruleCol);
-    var src = (ph.source || '').trim();
-    if (src.length > 60) src = src.substring(0, 60) + '\u2026';
-    lines.push('  ' + lineNum + '  ' + ruleLabel + DIM + src + RESET);
-    lines.push('  ' + _padRight('', 6) + '  ' + DIM + '\u2192 ' + ph.fix + RESET);
+
+  var groups = _groupByCategory(filtered);
+
+  for (var g = 0; g < groups.length; g++) {
+    var group = groups[g];
+    var catLabel = group.category;
+    var dashes = Math.max(0, 40 - catLabel.length);
+    lines.push('  ' + DIM + '\u2500\u2500 ' + catLabel + ' ' + '\u2500'.repeat(dashes) + RESET);
+
+    for (var i = 0; i < group.hits.length; i++) {
+      var ph = group.hits[i];
+      var sColor = _severityColor(ph.severity || 0);
+      var cColor = _categoryColor(ph.category);
+      var lineTag = 'L' + (ph.line + 1);
+      var badge = cColor + '[' + ph.ruleId + ']' + RESET;
+      var gutter = DIM + '\u2502' + RESET;
+
+      // Line 1: bold line number + colored badge (heaviest visual weight)
+      lines.push('  ' + sColor + BOLD + _padRight(lineTag, 6) + RESET + '  ' + badge);
+
+      // Line 2: gutter + syntax-highlighted code (medium weight)
+      if (ph.source) {
+        var snippet = ph.source.trim();
+        if (snippet.length > 80) snippet = snippet.substring(0, 79) + '\u2026';
+        lines.push('  ' + _padRight('', 6) + '  ' + gutter + ' ' + _highlight(snippet));
+      }
+
+      // Line 3: gutter + green fix (distinct, actionable)
+      if (ph.fix) {
+        lines.push('  ' + _padRight('', 6) + '  ' + gutter + ' ' + GREEN + '\u2192 ' + ph.fix + RESET);
+      }
+
+      lines.push('');
+    }
   }
   return lines;
 }

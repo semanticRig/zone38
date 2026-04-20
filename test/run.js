@@ -1859,16 +1859,16 @@ var cliPath = path.join(__dirname, '..', 'bin', 'slopguard.js');
 // --help includes --open
 var helpOut = execSync('node ' + cliPath + ' --help 2>&1', { encoding: 'utf8' });
 assert(helpOut.indexOf('--open') !== -1, 'cli --help: mentions --open');
-assert(helpOut.indexOf('Requires --verbose') !== -1, 'cli --help: --open mentions --verbose requirement');
+assert(helpOut.indexOf('Requires --verbose') === -1, 'cli --help: --open no longer requires --verbose');
 
-// --open without --verbose produces warning
-var openWarnOut;
+// --open without --verbose no longer warns (decoupled)
+var openNoVerbOut;
 try {
-  openWarnOut = execSync('node ' + cliPath + ' test/fixtures/clean.js --open 2>&1', { encoding: 'utf8' });
+  openNoVerbOut = execSync('node ' + cliPath + ' test/fixtures/clean.js --open 2>&1', { encoding: 'utf8' });
 } catch (e) {
-  openWarnOut = e.stdout + e.stderr;
+  openNoVerbOut = (e.stdout || '') + (e.stderr || '');
 }
-assert(openWarnOut.indexOf('--open has no effect without --verbose') !== -1, 'cli: --open without --verbose warns');
+assert(openNoVerbOut.indexOf('--open has no effect') === -1, 'cli: --open without --verbose does NOT warn');
 
 // --open with --json does not trigger interactive mode (just JSON output)
 var openJsonOut;
@@ -1907,6 +1907,47 @@ try {
   noOpenOut = e.stdout || '';
 }
 assert(typeof noOpenOut === 'string' && noOpenOut.length > 0, 'cli: normal run without --open works');
+
+// --- --show flag tests ---
+section('CLI --show flag');
+
+// _parseShowFilter unit tests
+var psf = L15._parseShowFilter;
+var ss = L15._shouldShow;
+assert(psf(null) === null, '--show: null returns null');
+assert(psf('') === null, '--show: empty string returns null');
+assert(psf('garbage') === null, '--show: invalid section returns null');
+var sf1 = psf('hits');
+assert(sf1 && sf1.hits === true, '--show: hits parsed');
+assert(!sf1.secrets, '--show: hits only — no secrets');
+var sf2 = psf('hits,secrets,review');
+assert(sf2.hits && sf2.secrets && sf2.review, '--show: multiple sections parsed');
+assert(!sf2.exposure && !sf2.breakdown, '--show: unmentioned sections absent');
+assert(ss('hits', null) === true, '_shouldShow: null filter shows all');
+assert(ss('hits', sf1) === true, '_shouldShow: hits visible with hits filter');
+assert(ss('secrets', sf1) === false, '_shouldShow: secrets hidden with hits filter');
+
+// --show=hits CLI: output includes PATTERN HITS but not EXPOSURE/REVIEW
+var showHitsOut;
+try {
+  showHitsOut = execSync('node ' + cliPath + ' test/fixtures/sloppy.js --show=hits 2>&1', { encoding: 'utf8' });
+} catch (e) {
+  showHitsOut = (e.stdout || '') + (e.stderr || '');
+}
+assert(showHitsOut.indexOf('PATTERN') !== -1, 'cli --show=hits: shows pattern hits');
+
+// --show=hits on directory: triggers per-file detail
+var showDirOut;
+try {
+  showDirOut = execSync('node ' + cliPath + ' test/fixtures --show=hits 2>&1', { encoding: 'utf8' });
+} catch (e) {
+  showDirOut = (e.stdout || '') + (e.stderr || '');
+}
+// Should have per-file detail (file separator lines)
+assert(showDirOut.indexOf('\u2500\u2500') !== -1, 'cli --show=hits on dir: shows per-file detail');
+
+// --help mentions --show
+assert(helpOut.indexOf('--show=') !== -1, 'cli --help: mentions --show flag');
 
 // --- Vector worker (batch) ---
 section('Vector worker (batch)');

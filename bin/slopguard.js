@@ -246,14 +246,18 @@ function printHelp() {
     '    --mcp               Scan MCP server configurations for risky patterns',
     '    --axis=A,B,C        Limit output to specific scoring axes',
     '    --threshold=A:N     Override exit-code threshold per axis, e.g. A:40,B:20',
+    '    --show=SECTIONS     Show only named sections: hits,secrets,review,exposure,breakdown',
+    '                        Implies per-file detail. Combine with --open for focused workflow.',
     '    --open              After report, interactively open flagged files at hit line',
-    '                        in $VISUAL / $EDITOR (falls back to less). Requires --verbose.',
+    '                        in $VISUAL / $EDITOR (falls back to less).',
     '',
     BOLD + '  EXAMPLES' + RESET,
     '    slopguard .',
     '    slopguard ./src --verbose',
     '    slopguard ./src --mcp --json',
     '    slopguard . --axis=A,B --threshold=A:40,B:20',
+    '    slopguard bigfile.js --show=hits --open',
+    '    slopguard ./src --show=hits,secrets',
     '',
   ];
   process.stdout.write(lines.join('\n') + '\n');
@@ -274,8 +278,10 @@ var mcpMode = args.includes('--mcp');
 var allMode = args.includes('--all');
 var openMode = args.includes('--open');
 
-if (openMode && !verbose) {
-  process.stderr.write('  warning: --open has no effect without --verbose\n');
+// --show=hits,secrets,review,exposure,breakdown
+var showArg = null;
+for (var si = 0; si < args.length; si++) {
+  if (args[si].indexOf('--show=') === 0) { showArg = args[si].slice(7); break; }
 }
 
 // --file=NAME
@@ -322,6 +328,7 @@ if (jsonMode) {
     all: allMode,
     file: fileArg,
     axis: axisArg,
+    show: showArg,
     targetPath: path.resolve(targetPath),
     thresholds: thresholds,
   });
@@ -331,7 +338,7 @@ if (jsonMode) {
 var v2Axes = (report.projectSummary && report.projectSummary.axes) || { A: 0, B: 0, C: 0 };
 var exitCodeVal = L15.exitCode(v2Axes, thresholds);
 
-if (openMode && verbose && !jsonMode && report.patternHits && report.patternHits.length > 0) {
+if (openMode && !jsonMode && report.patternHits && report.patternHits.length > 0) {
   var openTargets = collectOpenTargets(report.patternHits, targetPath);
   interactivePicker(openTargets, function () {
     process.exit(exitCodeVal);

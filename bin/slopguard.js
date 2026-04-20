@@ -27,7 +27,6 @@ function printHelp() {
     '    --mcp               Scan MCP server configurations for risky patterns',
     '    --axis=A,B,C        Limit output to specific scoring axes',
     '    --threshold=A:N     Override exit-code threshold per axis, e.g. A:40,B:20',
-    '    --v1                Use legacy v1 single-score engine',
     '',
     BOLD + '  EXAMPLES' + RESET,
     '    slopguard .',
@@ -45,22 +44,12 @@ if (args.includes('--help') || args.includes('-h')) {
 }
 
 var path = require('path');
-var scanner = require('../src/scanner');
-var scorer = require('../src/scorer');
 var pipelineRunner = require('../src/pipeline/runner');
 var L15 = require('../src/pipeline/L15-output');
 
 var verbose = args.includes('--verbose');
 var jsonMode = args.includes('--json');
 var mcpMode = args.includes('--mcp');
-var v1Mode = args.includes('--v1');
-var allMode = args.includes('--all');
-
-// --file=NAME
-var fileArg = null;
-for (var fi2 = 0; fi2 < args.length; fi2++) {
-  if (args[fi2].indexOf('--file=') === 0) { fileArg = args[fi2].slice(7); break; }
-}
 var allMode = args.includes('--all');
 
 // --file=NAME
@@ -95,215 +84,23 @@ if (!targetPath) {
   process.exit(1);
 }
 
-// ---------------------------------------------------------------------------
-// v2 Pipeline Path (default)
-// ---------------------------------------------------------------------------
-if (!v1Mode) {
-  var thresholds = L15._parseThresholds(thresholdArg);
-  var result = pipelineRunner.run(targetPath);
-  var report = result.report;
+var thresholds = L15._parseThresholds(thresholdArg);
+var result = pipelineRunner.run(targetPath, { mcp: mcpMode });
+var report = result.report;
 
-  if (jsonMode) {
-    process.stdout.write(L15.renderJson(report) + '\n');
-  } else {
-    var cliOutput = L15.renderCli(report, {
-      verbose: verbose,
-      all: allMode,
-      file: fileArg,
-      axis: axisArg,
-      targetPath: path.resolve(targetPath),
-      thresholds: thresholds,
-    });
-    process.stdout.write(cliOutput);
-  }
-
-  var v2Axes = (report.projectSummary && report.projectSummary.axes) || { A: 0, B: 0, C: 0 };
-  process.exit(L15.exitCode(v2Axes, thresholds));
-}
-
-// ---------------------------------------------------------------------------
-// v1 Legacy Path (--v1 flag)
-// ---------------------------------------------------------------------------
-
-// --- Run the scan ---
-var scanResult = scanner.scanAll(targetPath, { mcp: mcpMode });
-var project = scanResult.project;
-
-// --- Roast messages for high scores ---
-var ROASTS = [
-  { min: 0,  max: 10,  msg: 'Looking clean. Your tech lead would be proud.' },
-  { min: 11, max: 25,  msg: 'A little sloppy, but nothing a quick review can\'t fix.' },
-  { min: 26, max: 50,  msg: 'This code has that unmistakable AI aftertaste.' },
-  { min: 51, max: 75,  msg: 'Did you even read what the AI wrote before committing?' },
-  { min: 76, max: 100, msg: 'This is pure, uncut AI slop. Your tech lead is already writing the Slack message.' },
-];
-
-function getRoast(score) {
-  for (var i = 0; i < ROASTS.length; i++) {
-    if (score >= ROASTS[i].min && score <= ROASTS[i].max) return ROASTS[i].msg;
-  }
-  return '';
-}
-
-function scoreColor(score) {
-  if (score <= 10) return GREEN;
-  if (score <= 25) return YELLOW;
-  if (score <= 50) return YELLOW;
-  if (score <= 75) return RED;
-  return RED;
-}
-
-function padLeft(str, len) {
-  str = String(str);
-  while (str.length < len) str = ' ' + str;
-  return str;
-}
-
-function severityColor(sev) {
-  if (sev >= 9) return RED + BOLD;
-  if (sev >= 7) return RED;
-  if (sev >= 5) return YELLOW;
-  if (sev >= 3) return CYAN;
-  return DIM;
-}
-
-// --- JSON output ---
 if (jsonMode) {
-  var jsonOutput = {
-    target: path.resolve(targetPath),
-    score: project.score,
-    verdict: project.verdict.label,
-    fileCount: project.fileCount,
-    totalHits: project.totalHits,
-    totalEntropyFindings: project.totalEntropyFindings,
-    totalMCPFindings: project.totalMCPFindings || 0,
-    files: scanResult.files.map(function (fr) {
-      var scored = scorer.scoreFile(fr);
-      return {
-        relativePath: fr.relativePath,
-        isBackend: fr.isBackend,
-        isFrontend: fr.isFrontend,
-        score: scored.score,
-        verdict: scored.verdict.label,
-        breakdown: scored.breakdown,
-        hits: fr.hits.map(function (h) {
-          return {
-            ruleId: h.ruleId,
-            ruleName: h.ruleName,
-            category: h.category,
-            severity: h.severity,
-            lineNumber: h.lineNumber,
-            line: h.line.trim(),
-            fix: h.fix,
-          };
-        }),
-        entropyFindings: fr.entropyFindings,
-        compression: fr.compression,
-      };
-    }),
-    mcpFindings: scanResult.mcpFindings || [],
-  };
-  process.stdout.write(JSON.stringify(jsonOutput, null, 2) + '\n');
-  process.exit(project.score > 50 ? 1 : 0);
-}
-
-// --- Pretty output ---
-var w = process.stdout;
-
-// Header
-w.write('\n');
-w.write('  ' + BOLD + CYAN + 'slopguard' + RESET + DIM + ' — AI slop detector' + RESET + '\n');
-w.write('  ' + DIM + path.resolve(targetPath) + RESET + '\n');
-w.write('\n');
-
-// Project summary bar
-var projColor = scoreColor(project.score);
-var bar = projColor + BOLD + '  ' + project.verdict.emoji + ' Project Score: ' + project.score + '/100 — ' + project.verdict.label + RESET;
-w.write(bar + '\n');
-w.write('  ' + DIM + project.fileCount + ' files scanned | ' + project.totalHits + ' pattern hits | ' + project.totalEntropyFindings + ' entropy findings' + (mcpMode ? ' | ' + (project.totalMCPFindings || 0) + ' MCP findings' : '') + RESET + '\n');
-w.write('\n');
-
-// Roast
-var roast = getRoast(project.score);
-if (roast) {
-  w.write('  ' + DIM + '"' + roast + '"' + RESET + '\n\n');
-}
-
-// Per-file results
-w.write('  ' + BOLD + 'Per-file scores:' + RESET + '\n\n');
-
-// Sort files by score descending for readability
-var sortedScores = project.fileScores.slice().sort(function (a, b) { return b.score - a.score; });
-
-for (var j = 0; j < sortedScores.length; j++) {
-  var fs = sortedScores[j];
-  var fc = scoreColor(fs.score);
-  var scoreStr = padLeft(fs.score, 3);
-  var hitStr = fs.hitCount > 0 ? (' (' + fs.hitCount + ' hits)') : '';
-  w.write('    ' + fc + scoreStr + RESET + ' ' + fs.verdict.emoji + ' ' + fs.relativePath + DIM + hitStr + RESET + '\n');
-
-  // Verbose: show hits for this file
-  if (verbose && fs.hitCount > 0) {
-    // Find the matching file result
-    var fileResult = null;
-    for (var k = 0; k < scanResult.files.length; k++) {
-      if (scanResult.files[k].relativePath === fs.relativePath) {
-        fileResult = scanResult.files[k];
-        break;
-      }
-    }
-
-    if (fileResult) {
-      for (var h = 0; h < fileResult.hits.length; h++) {
-        var hit = fileResult.hits[h];
-        var sevC = severityColor(hit.severity);
-        w.write('        ' + sevC + 'L' + hit.lineNumber + RESET + ' ' + DIM + '[' + hit.category + ']' + RESET + ' ' + hit.ruleName + '\n');
-        w.write('        ' + DIM + hit.line.trim().substring(0, 80) + RESET + '\n');
-        w.write('        ' + GREEN + '\u21B3 ' + hit.fix + RESET + '\n');
-      }
-
-      // Show entropy findings
-      for (var e = 0; e < fileResult.entropyFindings.length; e++) {
-        var ef = fileResult.entropyFindings[e];
-        var prefixNote = ef.prefixMatch ? ' [known prefix]' : ' (H=' + ef.entropy + ')';
-        w.write('        ' + RED + BOLD + 'L' + ef.lineNumber + RESET + ' ' + DIM + '[entropy]' + RESET + ' High-entropy ' + ef.charset + ' string' + prefixNote + '\n');
-        if (ef.line) {
-          w.write('        ' + DIM + ef.line.trim().substring(0, 80) + RESET + '\n');
-        }
-        w.write('        ' + GREEN + '\u21B3 Move secrets to environment variables.' + RESET + '\n');
-      }
-
-      w.write('\n');
-    }
-  }
-}
-
-w.write('\n');
-
-// MCP findings section
-if (mcpMode && scanResult.mcpFindings && scanResult.mcpFindings.length > 0) {
-  w.write('  ' + BOLD + 'MCP Configuration Findings:' + RESET + '\n\n');
-  for (var m = 0; m < scanResult.mcpFindings.length; m++) {
-    var mf = scanResult.mcpFindings[m];
-    var mSevC = severityColor(mf.severity);
-    w.write('    ' + mSevC + '[sev ' + mf.severity + ']' + RESET + ' ' + mf.name + '\n');
-    w.write('    ' + DIM + mf.configFile + ' → ' + mf.path + RESET + '\n');
-    w.write('    ' + DIM + 'Value: ' + mf.value + RESET + '\n');
-    w.write('    ' + GREEN + '\u21B3 ' + mf.fix + RESET + '\n\n');
-  }
-}
-
-// Score breakdown
-if (verbose) {
-  w.write('  ' + BOLD + 'Scoring weights:' + RESET + '\n');
-  w.write('    Compression analysis: 40%  |  Pattern rules: 35%  |  Entropy: 15%  |  MCP: 10%\n\n');
-}
-
-// Footer with exit code info
-if (project.score > 50) {
-  w.write('  ' + BG_RED + WHITE + BOLD + ' FAIL ' + RESET + ' Slop score exceeds threshold (50). Exiting with code 1.\n\n');
+  process.stdout.write(L15.renderJson(report) + '\n');
 } else {
-  w.write('  ' + BG_GREEN + WHITE + BOLD + ' PASS ' + RESET + ' Slop score within acceptable range.\n\n');
+  var cliOutput = L15.renderCli(report, {
+    verbose: verbose,
+    all: allMode,
+    file: fileArg,
+    axis: axisArg,
+    targetPath: path.resolve(targetPath),
+    thresholds: thresholds,
+  });
+  process.stdout.write(cliOutput);
 }
 
-process.exit(project.score > 50 ? 1 : 0);
+var v2Axes = (report.projectSummary && report.projectSummary.axes) || { A: 0, B: 0, C: 0 };
+process.exit(L15.exitCode(v2Axes, thresholds));

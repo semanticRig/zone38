@@ -186,6 +186,25 @@ function _parseThresholds(thresholdArg) {
   return t;
 }
 
+// Parse --show=hits,secrets,review,exposure,breakdown
+var VALID_SECTIONS = { hits: true, secrets: true, review: true, exposure: true, breakdown: true };
+
+function _parseShowFilter(showArg) {
+  if (!showArg) return null;
+  var parts = showArg.toLowerCase().split(',');
+  var filter = {};
+  for (var i = 0; i < parts.length; i++) {
+    var s = parts[i].trim();
+    if (VALID_SECTIONS[s]) filter[s] = true;
+  }
+  return Object.keys(filter).length > 0 ? filter : null;
+}
+
+function _shouldShow(sectionName, showFilter) {
+  if (!showFilter) return true;  // no filter = show all
+  return showFilter[sectionName] === true;
+}
+
 // Number with commas
 function _commaNum(n) {
   var s = String(n);
@@ -593,28 +612,38 @@ function _renderSingleFile(report, opts) {
   // Exit line
   lines.push(_renderExitLine(code, axes, thresholds));
 
-  // Pattern hits (always shown in single-file mode)
-  var phLines = _renderPatternHits(report.patternHits);
-  for (var p = 0; p < phLines.length; p++) lines.push(phLines[p]);
+  var showFilter = _parseShowFilter(opts.show);
+
+  // Pattern hits
+  if (_shouldShow('hits', showFilter)) {
+    var phLines = _renderPatternHits(report.patternHits);
+    for (var p = 0; p < phLines.length; p++) lines.push(phLines[p]);
+  }
 
   // Secrets
-  var secLines = _renderSecrets(report.secrets);
-  for (var si = 0; si < secLines.length; si++) lines.push(secLines[si]);
+  if (_shouldShow('secrets', showFilter)) {
+    var secLines = _renderSecrets(report.secrets);
+    for (var si = 0; si < secLines.length; si++) lines.push(secLines[si]);
+  }
 
   // Exposure
-  var expLines = _renderExposure(report.exposure);
-  for (var e = 0; e < expLines.length; e++) lines.push(expLines[e]);
+  if (_shouldShow('exposure', showFilter)) {
+    var expLines = _renderExposure(report.exposure);
+    for (var e = 0; e < expLines.length; e++) lines.push(expLines[e]);
+  }
 
-  // MCP findings
+  // MCP findings (not filterable — always shown if present)
   var mcpLines = _renderMcpFindings(report.mcpFindings);
   for (var mi = 0; mi < mcpLines.length; mi++) lines.push(mcpLines[mi]);
 
   // Review bucket
-  var rvLines = _renderReview(report.review, null, opts.verbose);
-  for (var r = 0; r < rvLines.length; r++) lines.push(rvLines[r]);
+  if (_shouldShow('review', showFilter)) {
+    var rvLines = _renderReview(report.review, null, opts.verbose);
+    for (var r = 0; r < rvLines.length; r++) lines.push(rvLines[r]);
+  }
 
   // Verbose: slop breakdown
-  if (opts.verbose && report.slopBreakdown) {
+  if ((opts.verbose || _shouldShow('breakdown', showFilter)) && report.slopBreakdown) {
     var bdLines = _renderSlopBreakdown(report.slopBreakdown);
     for (var b = 0; b < bdLines.length; b++) lines.push(bdLines[b]);
   }
@@ -757,8 +786,9 @@ function _renderDirectory(report, opts) {
   var mcpLines2 = _renderMcpFindings(report.mcpFindings);
   for (var mci = 0; mci < mcpLines2.length; mci++) lines.push(mcpLines2[mci]);
 
-  // --- Project-level slop breakdown (verbose/all) ---
-  if ((opts.verbose || opts.all) && report.slopBreakdown) {
+  // --- Project-level slop breakdown (verbose/all/show=breakdown) ---
+  var showFilter = _parseShowFilter(opts.show);
+  if ((opts.verbose || opts.all || _shouldShow('breakdown', showFilter)) && report.slopBreakdown) {
     var bdLines = _renderSlopBreakdown(report.slopBreakdown);
     for (var bdi = 0; bdi < bdLines.length; bdi++) lines.push(bdLines[bdi]);
   }
@@ -781,7 +811,7 @@ function _renderDirectory(report, opts) {
     }
   } else if (showAll) {
     detailFiles = perFile;
-  } else if (verbose) {
+  } else if (verbose || showFilter) {
     for (var vfi = 0; vfi < perFile.length; vfi++) {
       var vpf = perFile[vfi];
       if (Math.max(vpf.axes.A, vpf.axes.B, vpf.axes.C) > 10) {
@@ -809,20 +839,28 @@ function _renderDirectory(report, opts) {
       for (var dal = 0; dal < dfAxisLines.length; dal++) lines.push(dfAxisLines[dal]);
 
       // Pattern hits for this file
-      var dfPh = _renderPatternHits(report.patternHits, df.path);
-      for (var dpi = 0; dpi < dfPh.length; dpi++) lines.push(dfPh[dpi]);
+      if (_shouldShow('hits', showFilter)) {
+        var dfPh = _renderPatternHits(report.patternHits, df.path);
+        for (var dpi = 0; dpi < dfPh.length; dpi++) lines.push(dfPh[dpi]);
+      }
 
       // Secrets for this file
-      var dfSec = _renderSecrets(report.secrets, df.path);
-      for (var dsi = 0; dsi < dfSec.length; dsi++) lines.push(dfSec[dsi]);
+      if (_shouldShow('secrets', showFilter)) {
+        var dfSec = _renderSecrets(report.secrets, df.path);
+        for (var dsi = 0; dsi < dfSec.length; dsi++) lines.push(dfSec[dsi]);
+      }
 
       // Exposure for this file
-      var dfExp = _renderExposure(report.exposure, df.path);
-      for (var dei = 0; dei < dfExp.length; dei++) lines.push(dfExp[dei]);
+      if (_shouldShow('exposure', showFilter)) {
+        var dfExp = _renderExposure(report.exposure, df.path);
+        for (var dei = 0; dei < dfExp.length; dei++) lines.push(dfExp[dei]);
+      }
 
       // Review for this file
-      var dfRv = _renderReview(report.review, df.path, opts.verbose);
-      for (var dri = 0; dri < dfRv.length; dri++) lines.push(dfRv[dri]);
+      if (_shouldShow('review', showFilter)) {
+        var dfRv = _renderReview(report.review, df.path, opts.verbose);
+        for (var dri = 0; dri < dfRv.length; dri++) lines.push(dfRv[dri]);
+      }
     }
   }
 
@@ -883,5 +921,7 @@ module.exports = {
   _renderAxisTable:   _renderAxisTable,
   _renderExitLine:    _renderExitLine,
   _verdictFromScore:  _verdictFromScore,
+  _parseShowFilter:   _parseShowFilter,
+  _shouldShow:        _shouldShow,
   DEFAULT_THRESHOLDS: DEFAULT_THRESHOLDS,
 };

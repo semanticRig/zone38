@@ -1003,7 +1003,9 @@ var l15CliReport = {
     { category: 'error-handling', hitCount: 1, fileCount: 1, topSeverity: 8 },
   ],
   review: [
-    { value: 'mayb****et', file: 'src/a.js', line: 20, pipelineScore: 0.35, signals: 1 },
+    { value: 'high****re', file: 'src/a.js', line: 20, pipelineScore: 0.60, signals: 2 },
+    { value: 'mayb****et', file: 'src/a.js', line: 25, pipelineScore: 0.45, signals: 1 },
+    { value: 'nois****se', file: 'src/a.js', line: 30, pipelineScore: 0.20, signals: 1 },
   ],
   cleanFiles: [{ file: 'src/b.js', axes: { A: 0, B: 0, C: 0 } }],
 };
@@ -1030,6 +1032,93 @@ var l15PassBanner = L15.renderBanner(0, { A: 10, B: 5, C: 3 }, L15.DEFAULT_THRES
 assert(l15PassBanner === '', 'L15 renderBanner: returns empty string');
 var l15FailBanner = L15.renderBanner(1, { A: 60, B: 30, C: 5 }, L15.DEFAULT_THRESHOLDS);
 assert(l15FailBanner === '', 'L15 renderBanner: fail also returns empty string');
+
+// --- Review triage split ---
+section('L15 — Review triage split');
+
+// Build review items across all three tiers
+var triageReview = [
+  { value: 'aaa', file: 'f.js', line: 1, pipelineScore: 0.70, signals: 2, shape: 'mixed', valueLength: 20 },
+  { value: 'bbb', file: 'f.js', line: 2, pipelineScore: 0.55, signals: 2, shape: 'hex-shaped', valueLength: 32 },
+  { value: 'ccc', file: 'f.js', line: 3, pipelineScore: 0.50, signals: 1, shape: 'mixed', valueLength: 12 },
+  { value: 'ddd', file: 'f.js', line: 4, pipelineScore: 0.40, signals: 1, shape: 'mixed', valueLength: 10 },
+  { value: 'eee', file: 'f.js', line: 5, pipelineScore: 0.30, signals: 1, shape: 'mixed', valueLength: 8 },
+  { value: 'fff', file: 'f.js', line: 6, pipelineScore: 0.10, signals: 0, shape: 'mixed', valueLength: 6 },
+];
+
+// Default mode (no verbose): only Tier 1 visible, hidden summary present
+var triageReport = {
+  projectSummary: { axes: { A: 5, B: 5, C: 5 }, verdicts: { A: 'Minimal', B: 'Minimal', C: 'Minimal' }, fileCount: 1, totalLines: 100 },
+  perFile: [{ path: 'f.js', axes: { A: 5, B: 5, C: 5 }, breakdown: {}, lineCount: 100, roleWeight: 1 }],
+  secrets: [], exposure: [], patternHits: [], slopBreakdown: [], cleanFiles: [],
+  review: triageReview,
+};
+
+var triageDefault = L15.renderCli(triageReport, { targetPath: '/tmp/test' });
+// Default shows only Tier 1 items (score >= 0.55): lines 1 and 2 (displayed as L2, L3)
+assert(triageDefault.indexOf('score=0.70') !== -1, 'triage default: shows Tier 1 item (score 0.70)');
+assert(triageDefault.indexOf('score=0.55') !== -1, 'triage default: shows Tier 1 item (score 0.55)');
+// Default hides Tier 2 + Tier 3
+assert(triageDefault.indexOf('low-confidence') !== -1, 'triage default: shows hidden count summary');
+assert(triageDefault.indexOf('4 low-confidence') !== -1, 'triage default: hidden count is 4');
+// Tier 3 items should not be individually visible
+assert(triageDefault.indexOf('score=0.10') === -1, 'triage default: Tier 3 item not shown');
+assert(triageDefault.indexOf('score=0.30') === -1, 'triage default: Tier 3 item (0.30) not shown');
+
+// Verbose mode: Tier 1 + Tier 2 visible, Tier 3 suppressed
+var triageVerbose = L15.renderCli(triageReport, { verbose: true, targetPath: '/tmp/test' });
+assert(triageVerbose.indexOf('worth a look') !== -1, 'triage verbose: shows Tier 1 header');
+assert(triageVerbose.indexOf('probably fine') !== -1, 'triage verbose: shows Tier 2 header');
+assert(triageVerbose.indexOf('score=0.70') !== -1, 'triage verbose: Tier 1 item visible');
+assert(triageVerbose.indexOf('score=0.50') !== -1, 'triage verbose: Tier 2 item visible');
+assert(triageVerbose.indexOf('score=0.40') !== -1, 'triage verbose: Tier 2 item 0.40 visible');
+assert(triageVerbose.indexOf('mathematical artifact') !== -1, 'triage verbose: shows Tier 3 suppressed count');
+assert(triageVerbose.indexOf('2 mathematical artifact') !== -1, 'triage verbose: Tier 3 count is 2');
+// Tier 3 individual items hidden even in verbose
+assert(triageVerbose.indexOf('score=0.10') === -1, 'triage verbose: Tier 3 item (0.10) not shown');
+assert(triageVerbose.indexOf('score=0.30') === -1, 'triage verbose: Tier 3 item (0.30) not shown');
+
+// Dedup: duplicate line+value items should collapse
+var triageDup = [
+  { value: 'aaa', file: 'f.js', line: 1, pipelineScore: 0.70, signals: 2, shape: 'mixed', valueLength: 20 },
+  { value: 'aaa', file: 'f.js', line: 1, pipelineScore: 0.70, signals: 2, shape: 'mixed', valueLength: 20 },
+  { value: 'bbb', file: 'f.js', line: 2, pipelineScore: 0.60, signals: 1, shape: 'mixed', valueLength: 16 },
+];
+var triageDupReport = {
+  projectSummary: { axes: { A: 5, B: 5, C: 5 }, verdicts: { A: 'Minimal', B: 'Minimal', C: 'Minimal' }, fileCount: 1, totalLines: 50 },
+  perFile: [{ path: 'f.js', axes: { A: 5, B: 5, C: 5 }, breakdown: {}, lineCount: 50, roleWeight: 1 }],
+  secrets: [], exposure: [], patternHits: [], slopBreakdown: [], cleanFiles: [],
+  review: triageDup,
+};
+var triageDupOut = L15.renderCli(triageDupReport, { targetPath: '/tmp/test' });
+// Header should show 2 (deduped), not 3
+assert(triageDupOut.indexOf('2 uncertain') !== -1, 'triage dedup: header shows 2 after dedup');
+
+// Empty review: no REVIEW section rendered
+var triageEmpty = []; 
+var triageEmptyReport = {
+  projectSummary: { axes: { A: 0, B: 0, C: 0 }, verdicts: { A: 'Clean', B: 'Clean', C: 'Clean' }, fileCount: 1, totalLines: 50 },
+  perFile: [{ path: 'f.js', axes: { A: 0, B: 0, C: 0 }, breakdown: {}, lineCount: 50, roleWeight: 1 }],
+  secrets: [], exposure: [], patternHits: [], slopBreakdown: [], cleanFiles: [],
+  review: triageEmpty,
+};
+var triageEmptyOut = L15.renderCli(triageEmptyReport, { targetPath: '/tmp/test' });
+assert(triageEmptyOut.indexOf('REVIEW') === -1, 'triage empty: no REVIEW section when empty');
+
+// All items below Tier 1: default shows 0 count + hidden summary
+var triageAllLow = [
+  { value: 'xxx', file: 'f.js', line: 1, pipelineScore: 0.42, signals: 1, shape: 'mixed', valueLength: 10 },
+  { value: 'yyy', file: 'f.js', line: 2, pipelineScore: 0.20, signals: 0, shape: 'mixed', valueLength: 8 },
+];
+var triageAllLowReport = {
+  projectSummary: { axes: { A: 0, B: 5, C: 0 }, verdicts: { A: 'Clean', B: 'Minimal', C: 'Clean' }, fileCount: 1, totalLines: 50 },
+  perFile: [{ path: 'f.js', axes: { A: 0, B: 5, C: 0 }, breakdown: {}, lineCount: 50, roleWeight: 1 }],
+  secrets: [], exposure: [], patternHits: [], slopBreakdown: [], cleanFiles: [],
+  review: triageAllLow,
+};
+var triageAllLowOut = L15.renderCli(triageAllLowReport, { targetPath: '/tmp/test' });
+assert(triageAllLowOut.indexOf('0 uncertain') !== -1, 'triage all-low default: header shows 0');
+assert(triageAllLowOut.indexOf('2 low-confidence') !== -1, 'triage all-low default: 2 items hidden');
 
 // --- Pipeline Runner integration ---
 section('Pipeline Runner');

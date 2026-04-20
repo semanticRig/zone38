@@ -201,10 +201,36 @@ function _renderPatternHits(hits, fileFilter) {
 }
 
 // ---------------------------------------------------------------------------
-// Review bucket section
+// Review bucket section — triage split
 // ---------------------------------------------------------------------------
+// Tier thresholds (presentation only — L08 arbitration is untouched)
+var REVIEW_TIER1_FLOOR = 0.55;   // "worth a look"
+var REVIEW_TIER2_FLOOR = 0.35;   // "probably fine"
+                                  // below TIER2_FLOOR = "mathematical noise"
 
-function _renderReview(items, fileFilter) {
+function _dedupeReview(items) {
+  var seen = {};
+  var out = [];
+  for (var i = 0; i < items.length; i++) {
+    var key = items[i].line + ':' + (items[i].value || '');
+    if (seen[key]) continue;
+    seen[key] = true;
+    out.push(items[i]);
+  }
+  return out;
+}
+
+function _renderReviewItem(rv) {
+  var lineNum = _padLeft('L' + (rv.line + 1), 6);
+  var score = 'score=' + rv.pipelineScore.toFixed(2);
+  var shape = _padRight(rv.shape || 'mixed', 14);
+  var len = 'len=' + _padLeft(String(rv.valueLength || 0), 3);
+  var cf = 'char-freq:' + _signalLabel(rv.charFreqSignal);
+  var bg = 'bigram:' + _signalLabel(rv.bigramSignal);
+  return '  ' + lineNum + '  ' + DIM + score + '  ' + shape + len + '   ' + cf + '  ' + bg + RESET;
+}
+
+function _renderReview(items, fileFilter, verbose) {
   if (!items || items.length === 0) return [];
   var filtered = items;
   if (fileFilter) {
@@ -215,20 +241,64 @@ function _renderReview(items, fileFilter) {
   }
   if (filtered.length === 0) return [];
 
-  var lines = [];
-  lines.push('');
-  lines.push(BOLD + 'REVIEW' + RESET + '  (' + filtered.length + ' uncertain \u2014 human judgment required)');
-  lines.push('');
+  // Deduplicate by line + value
+  filtered = _dedupeReview(filtered);
+
+  // Split into tiers
+  var tier1 = [], tier2 = [], tier3 = [];
   for (var i = 0; i < filtered.length; i++) {
-    var rv = filtered[i];
-    var lineNum = _padLeft('L' + (rv.line + 1), 6);
-    var score = 'score=' + rv.pipelineScore.toFixed(2);
-    var shape = _padRight(rv.shape || 'mixed', 14);
-    var len = 'len=' + _padLeft(String(rv.valueLength || 0), 3);
-    var cf = 'char-freq:' + _signalLabel(rv.charFreqSignal);
-    var bg = 'bigram:' + _signalLabel(rv.bigramSignal);
-    lines.push('  ' + lineNum + '  ' + DIM + score + '  ' + shape + len + '   ' + cf + '  ' + bg + RESET);
+    var sc = filtered[i].pipelineScore || 0;
+    if (sc >= REVIEW_TIER1_FLOOR) tier1.push(filtered[i]);
+    else if (sc >= REVIEW_TIER2_FLOOR) tier2.push(filtered[i]);
+    else tier3.push(filtered[i]);
   }
+
+  var lines = [];
+  var totalShown = tier1.length;
+  var hiddenCount = tier2.length + tier3.length;
+
+  if (verbose) {
+    // Verbose: show Tier 1 + Tier 2, suppress Tier 3
+    totalShown = tier1.length + tier2.length;
+    hiddenCount = tier3.length;
+
+    lines.push('');
+    lines.push(BOLD + 'REVIEW' + RESET + '  (' + filtered.length + ' uncertain \u2014 human judgment required)');
+
+    if (tier1.length > 0) {
+      lines.push('');
+      lines.push('  ' + BOLD + '\u25b2 worth a look (score \u2265 0.55)' + RESET);
+      for (var t1 = 0; t1 < tier1.length; t1++) lines.push(_renderReviewItem(tier1[t1]));
+    }
+
+    if (tier2.length > 0) {
+      lines.push('');
+      lines.push('  ' + DIM + '\u00b7 probably fine (score < 0.55)' + RESET);
+      for (var t2 = 0; t2 < tier2.length; t2++) lines.push(_renderReviewItem(tier2[t2]));
+    }
+
+    if (tier3.length > 0) {
+      lines.push('');
+      lines.push('  ' + DIM + '+ ' + tier3.length + ' mathematical artifact'
+        + (tier3.length > 1 ? 's' : '') + ' (score < 0.35) suppressed.' + RESET);
+    }
+  } else {
+    // Default: show only Tier 1, summarize rest
+    lines.push('');
+    lines.push(BOLD + 'REVIEW' + RESET + '  (' + tier1.length + ' uncertain \u2014 human judgment required)');
+
+    if (tier1.length > 0) {
+      lines.push('');
+      for (var d1 = 0; d1 < tier1.length; d1++) lines.push(_renderReviewItem(tier1[d1]));
+    }
+
+    if (hiddenCount > 0) {
+      lines.push('');
+      lines.push('  ' + DIM + '+ ' + hiddenCount + ' low-confidence item'
+        + (hiddenCount > 1 ? 's' : '') + ' hidden (scores < 0.55). Run with --verbose to expand.' + RESET);
+    }
+  }
+
   return lines;
 }
 
@@ -426,7 +496,7 @@ function _renderSingleFile(report, opts) {
   for (var mi = 0; mi < mcpLines.length; mi++) lines.push(mcpLines[mi]);
 
   // Review bucket
-  var rvLines = _renderReview(report.review);
+  var rvLines = _renderReview(report.review, null, opts.verbose);
   for (var r = 0; r < rvLines.length; r++) lines.push(rvLines[r]);
 
   // Verbose: slop breakdown
@@ -637,7 +707,7 @@ function _renderDirectory(report, opts) {
       for (var dei = 0; dei < dfExp.length; dei++) lines.push(dfExp[dei]);
 
       // Review for this file
-      var dfRv = _renderReview(report.review, df.path);
+      var dfRv = _renderReview(report.review, df.path, opts.verbose);
       for (var dri = 0; dri < dfRv.length; dri++) lines.push(dfRv[dri]);
     }
   }

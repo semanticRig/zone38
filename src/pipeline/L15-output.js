@@ -358,6 +358,26 @@ function _verdictFromScore(score) {
 }
 
 // ---------------------------------------------------------------------------
+// MCP findings section
+// ---------------------------------------------------------------------------
+
+function _renderMcpFindings(mcpFindings) {
+  if (!mcpFindings || mcpFindings.length === 0) return [];
+  var lines = [];
+  lines.push('');
+  lines.push(BOLD + 'MCP RISKS' + RESET + '  (' + mcpFindings.length + ' finding' + (mcpFindings.length > 1 ? 's' : '') + ')');
+  lines.push('');
+  for (var i = 0; i < mcpFindings.length; i++) {
+    var mf = mcpFindings[i];
+    var sevColor = mf.severity >= 8 ? RED : YELLOW;
+    lines.push('  ' + sevColor + 'sev:' + mf.severity + RESET + '  '
+      + _padRight(mf.ruleId, 26) + DIM + mf.source + RESET);
+    lines.push('  ' + _padRight('', 5) + '  ' + DIM + '\u2192 ' + mf.fix + RESET);
+  }
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
 // Single-file mode
 // ---------------------------------------------------------------------------
 
@@ -400,6 +420,10 @@ function _renderSingleFile(report, opts) {
   // Exposure
   var expLines = _renderExposure(report.exposure);
   for (var e = 0; e < expLines.length; e++) lines.push(expLines[e]);
+
+  // MCP findings
+  var mcpLines = _renderMcpFindings(report.mcpFindings);
+  for (var mi = 0; mi < mcpLines.length; mi++) lines.push(mcpLines[mi]);
 
   // Review bucket
   var rvLines = _renderReview(report.review);
@@ -544,6 +568,10 @@ function _renderDirectory(report, opts) {
   // --- Correlation ---
   var corrLines = _renderCorrelation(summary.correlation);
   for (var cri = 0; cri < corrLines.length; cri++) lines.push(corrLines[cri]);
+
+  // --- MCP findings ---
+  var mcpLines2 = _renderMcpFindings(report.mcpFindings);
+  for (var mci = 0; mci < mcpLines2.length; mci++) lines.push(mcpLines2[mci]);
 
   // --- Project-level slop breakdown (verbose/all) ---
   if ((opts.verbose || opts.all) && report.slopBreakdown) {

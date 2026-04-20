@@ -22,6 +22,7 @@ var L11 = require('./L11-correlation.js');
 var L12 = require('./L12-calibration.js');
 var L13 = require('./L13-scoring.js');
 var L14 = require('./L14-report.js');
+var mcpScanner = require('./mcp-scanner.js');
 
 // ---------------------------------------------------------------------------
 // Per-file pipeline (L01 through L10)
@@ -145,6 +146,33 @@ function run(targetPath, opts) {
     _processFile(registry[i], corpusDir);
   }
 
+  // MCP config scanning (when --mcp flag is set)
+  var mcpResults = [];
+  if (opts.mcp) {
+    mcpResults = mcpScanner.scan(absPath);
+    for (var mi = 0; mi < mcpResults.length; mi++) {
+      var mcpFile = mcpResults[mi];
+      if (mcpFile.findings.length === 0) continue;
+      // Synthetic registry record so MCP findings flow through L13 scoring
+      registry.push({
+        path:         mcpFile.configPath,
+        relativePath: mcpFile.configRelPath,
+        ext:          '.json',
+        size:         mcpFile.size,
+        depth:        1,
+        territory:    'config',
+        role:         null,
+        surface:      { avgLineLength: 40, minified: false },
+        compression:  null,
+        candidates:   [],
+        findings:     [],
+        review:       [],
+        patternHits:  mcpFile.findings,
+        urlFindings:  [],
+      });
+    }
+  }
+
   // L11 — Cross-file correlation (project-level)
   var correlation = L11.correlate(registry);
 
@@ -156,6 +184,24 @@ function run(targetPath, opts) {
 
   // L14 — Report assembly
   var report = L14.assembleReport(scoringResult, registry, correlation);
+
+  // Attach MCP scan results to report for JSON output
+  if (mcpResults.length > 0) {
+    report.mcpFindings = [];
+    for (var mri = 0; mri < mcpResults.length; mri++) {
+      var mrf = mcpResults[mri];
+      for (var mrfi = 0; mrfi < mrf.findings.length; mrfi++) {
+        var f = mrf.findings[mrfi];
+        report.mcpFindings.push({
+          ruleId:     f.ruleId,
+          severity:   f.severity,
+          file:       mrf.configRelPath,
+          source:     f.line,
+          fix:        f.fix,
+        });
+      }
+    }
+  }
 
   return {
     report: report,

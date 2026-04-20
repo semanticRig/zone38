@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [16, 18, 20, 22]
+        node-version: [16, 18, 20, 22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,7 +28,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Self-scan with slopguard
-        run: node bin/slopguard.js . --mcp --json
+      - name: Self-scan (JSON)
+        run: |
+          node bin/slopguard.js . --json | tee /tmp/slopguard-report.json
+          node -e "var r=JSON.parse(require('fs').readFileSync('/tmp/slopguard-report.json','utf8')); if(!r.projectSummary||!r.projectSummary.axes) { process.exit(1); } console.log('Axes:', JSON.stringify(r.projectSummary.axes));"
+      - name: Self-scan (strict threshold gate)
+        run: node bin/slopguard.js . --threshold=A:50,B:25
       - name: Verify package contents
         run: npm pack --dry-run

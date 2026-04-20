@@ -20,14 +20,21 @@
   ],
   "author": "slopguard contributors",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/semanticRig/slopguard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/semanticRig/slopguard/issues"
+  },
+  "homepage": "https://github.com/semanticRig/slopguard#readme",
   "files": [
     "bin/",
     "src/",
     "corpus/",
     "templates/",
     "README.md",
-    "LICENSE",
-    "PHASES.md"
+    "LICENSE"
   ],
   "engines": {
     "node": ">=16.0.0"

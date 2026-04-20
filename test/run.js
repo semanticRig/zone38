@@ -1850,6 +1850,64 @@ assert(mcpReport.patternHits.length >= 4, 'mcp: MCP findings appear in patternHi
 var mcpOffResult = require('../src/pipeline/runner.js').run(path.join(fixturesDir, 'mcp-project'), {});
 assert(!mcpOffResult.report.mcpFindings, 'mcp: no mcpFindings when --mcp not set');
 
+// --- CLI --open flag tests ---
+section('CLI — --open flag');
+
+var execSync = require('child_process').execSync;
+var cliPath = path.join(__dirname, '..', 'bin', 'slopguard.js');
+
+// --help includes --open
+var helpOut = execSync('node ' + cliPath + ' --help 2>&1', { encoding: 'utf8' });
+assert(helpOut.indexOf('--open') !== -1, 'cli --help: mentions --open');
+assert(helpOut.indexOf('Requires --verbose') !== -1, 'cli --help: --open mentions --verbose requirement');
+
+// --open without --verbose produces warning
+var openWarnOut;
+try {
+  openWarnOut = execSync('node ' + cliPath + ' test/fixtures/clean.js --open 2>&1', { encoding: 'utf8' });
+} catch (e) {
+  openWarnOut = e.stdout + e.stderr;
+}
+assert(openWarnOut.indexOf('--open has no effect without --verbose') !== -1, 'cli: --open without --verbose warns');
+
+// --open with --json does not trigger interactive mode (just JSON output)
+var openJsonOut;
+try {
+  openJsonOut = execSync('node ' + cliPath + ' test/fixtures/sloppy.js --json --open --verbose 2>&1', { encoding: 'utf8' });
+} catch (e) {
+  openJsonOut = e.stdout || '';
+}
+var openJsonParsed = JSON.parse(openJsonOut.trim());
+assert(openJsonParsed.projectSummary !== undefined, 'cli: --open + --json still outputs valid JSON');
+
+// --open is inert on clean files (no hits = no interactive prompt)
+var openCleanOut;
+try {
+  openCleanOut = execSync('node ' + cliPath + ' test/fixtures/clean.js --verbose --open 2>&1', { encoding: 'utf8' });
+} catch (e) {
+  openCleanOut = (e.stdout || '') + (e.stderr || '');
+}
+// Should not hang and should not contain OPEN FILES header
+assert(openCleanOut.indexOf('OPEN FILES') === -1, 'cli: --open on clean file does not show OPEN FILES');
+
+// --open on sloppy file in non-TTY warns about interactive terminal
+var openSloppyOut;
+try {
+  openSloppyOut = execSync('node ' + cliPath + ' test/fixtures/sloppy.js --verbose --open 2>&1', { encoding: 'utf8' });
+} catch (e) {
+  openSloppyOut = (e.stdout || '') + (e.stderr || '');
+}
+assert(openSloppyOut.indexOf('interactive terminal') !== -1, 'cli: --open in non-TTY warns about interactive terminal');
+
+// Normal run without --open still exits normally
+var noOpenOut;
+try {
+  noOpenOut = execSync('node ' + cliPath + ' test/fixtures/clean.js 2>&1', { encoding: 'utf8' });
+} catch (e) {
+  noOpenOut = e.stdout || '';
+}
+assert(typeof noOpenOut === 'string' && noOpenOut.length > 0, 'cli: normal run without --open works');
+
 // --- Vector worker (batch) ---
 section('Vector worker (batch)');
 

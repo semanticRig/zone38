@@ -3,3 +3,12 @@ node_modules/
 .DS_Store
 coverage/
 src/pipeline/L15-output.js.bak
+
+# Local instruction/planning artifacts
+CLAUDE.md
+PHASES.md
+solution/
+solutionV2/
+playground/
+.github/instructions/
+*.instructions.md

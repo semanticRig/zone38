@@ -1,24 +1,15 @@
 'use strict';
 
-// Public API entry point for slopguard
+// Public API entry point for slopguard v2
 
-var scanner = require('./scanner');
-var entropy = require('./entropy');
-var compression = require('./compression');
-var scorer = require('./scorer');
+var runner = require('./pipeline/runner');
+var L15 = require('./pipeline/L15-output');
 
 module.exports = {
-  discoverFiles: scanner.discoverFiles,
-  scanFile: scanner.scanFile,
-  scanAll: scanner.scanAll,
-  isBackendFile: scanner.isBackendFile,
-  isFrontendFile: scanner.isFrontendFile,
-  shannonEntropy: entropy.shannonEntropy,
-  analyzeFileEntropy: entropy.analyzeFileEntropy,
-  analyzeCompression: compression.analyzeCompression,
-  ncd: compression.ncd,
-  selfCompressionRatio: compression.selfCompressionRatio,
-  scoreFile: scorer.scoreFile,
-  scoreProject: scorer.scoreProject,
-  getVerdict: scorer.getVerdict,
+  run: runner.run,
+  renderJson: L15.renderJson,
+  renderCli: L15.renderCli,
+  renderBanner: L15.renderBanner,
+  exitCode: L15.exitCode,
+  DEFAULT_THRESHOLDS: L15.DEFAULT_THRESHOLDS,
 };

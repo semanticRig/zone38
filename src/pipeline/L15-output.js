@@ -280,7 +280,7 @@ function _renderExitLine(code, axes, thresholds) {
 // Pattern hits section
 // ---------------------------------------------------------------------------
 
-function _renderPatternHits(hits, fileFilter) {
+function _renderPatternHits(hits, fileFilter, verbose) {
   if (!hits || hits.length === 0) return [];
   var filtered = hits;
   if (fileFilter) {
@@ -303,6 +303,41 @@ function _renderPatternHits(hits, fileFilter) {
     var catLabel = group.category;
     var dashes = Math.max(0, 40 - catLabel.length);
     lines.push('  ' + DIM + '\u2500\u2500 ' + catLabel + ' ' + '\u2500'.repeat(dashes) + RESET);
+
+    if (!verbose) {
+      // Collapsed: one entry per ruleId with count + first 3 lines + fix
+      var byRule = {};
+      var ruleOrder = [];
+      for (var ri = 0; ri < group.hits.length; ri++) {
+        var rh = group.hits[ri];
+        var rk = rh.ruleId || 'unknown';
+        if (!byRule[rk]) {
+          byRule[rk] = { ruleId: rk, category: rh.category, severity: rh.severity, fix: rh.fix, hits: [] };
+          ruleOrder.push(rk);
+        }
+        byRule[rk].hits.push(rh);
+      }
+
+      for (var rj = 0; rj < ruleOrder.length; rj++) {
+        var rg = byRule[ruleOrder[rj]];
+        var rCount = rg.hits.length;
+        var rColor = _categoryColor(rg.category);
+        var rBadge = rColor + '[' + rg.ruleId + ']' + RESET;
+        var rSev = _severityColor(rg.severity || 0);
+        var firstLines = rg.hits.slice(0, 3).map(function(h) { return 'L' + (h.line + 1); }).join(' ');
+        var more = rCount > 3 ? '  ' + DIM + '+' + (rCount - 3) + ' more' + RESET : '';
+        var countLabel = rCount + ' hit' + (rCount === 1 ? '' : 's');
+        lines.push(
+          '  ' + rBadge + '  ' + rSev + BOLD + countLabel + RESET +
+          '  ' + DIM + '\u2014' + RESET + '  ' + firstLines + more
+        );
+        if (rg.fix) {
+          lines.push('     ' + GREEN + '\u2192 ' + rg.fix + RESET);
+        }
+        lines.push('');
+      }
+      continue;
+    }
 
     for (var i = 0; i < group.hits.length; i++) {
       var ph = group.hits[i];
@@ -330,6 +365,12 @@ function _renderPatternHits(hits, fileFilter) {
       lines.push('');
     }
   }
+
+  if (!verbose) {
+    lines.push('  ' + DIM + 'run with -v to see every hit line' + RESET);
+    lines.push('');
+  }
+
   return lines;
 }
 
@@ -613,10 +654,11 @@ function _renderSingleFile(report, opts) {
   lines.push(_renderExitLine(code, axes, thresholds));
 
   var showFilter = _parseShowFilter(opts.show);
+  var compact = opts.compact && !opts.verbose && !showFilter;
 
   // Pattern hits
-  if (_shouldShow('hits', showFilter)) {
-    var phLines = _renderPatternHits(report.patternHits);
+  if (!compact && _shouldShow('hits', showFilter)) {
+    var phLines = _renderPatternHits(report.patternHits, null, opts.verbose);
     for (var p = 0; p < phLines.length; p++) lines.push(phLines[p]);
   }
 
@@ -627,7 +669,7 @@ function _renderSingleFile(report, opts) {
   }
 
   // Exposure
-  if (_shouldShow('exposure', showFilter)) {
+  if (!compact && _shouldShow('exposure', showFilter)) {
     var expLines = _renderExposure(report.exposure);
     for (var e = 0; e < expLines.length; e++) lines.push(expLines[e]);
   }
@@ -637,7 +679,7 @@ function _renderSingleFile(report, opts) {
   for (var mi = 0; mi < mcpLines.length; mi++) lines.push(mcpLines[mi]);
 
   // Review bucket
-  if (_shouldShow('review', showFilter)) {
+  if (!compact && _shouldShow('review', showFilter)) {
     var rvLines = _renderReview(report.review, null, opts.verbose);
     for (var r = 0; r < rvLines.length; r++) lines.push(rvLines[r]);
   }
@@ -788,6 +830,7 @@ function _renderDirectory(report, opts) {
 
   // --- Project-level slop breakdown (verbose/all/show=breakdown) ---
   var showFilter = _parseShowFilter(opts.show);
+  var compact = opts.compact && !opts.verbose && !showFilter;
   if ((opts.verbose || opts.all || _shouldShow('breakdown', showFilter)) && report.slopBreakdown) {
     var bdLines = _renderSlopBreakdown(report.slopBreakdown);
     for (var bdi = 0; bdi < bdLines.length; bdi++) lines.push(bdLines[bdi]);
@@ -839,8 +882,8 @@ function _renderDirectory(report, opts) {
       for (var dal = 0; dal < dfAxisLines.length; dal++) lines.push(dfAxisLines[dal]);
 
       // Pattern hits for this file
-      if (_shouldShow('hits', showFilter)) {
-        var dfPh = _renderPatternHits(report.patternHits, df.path);
+      if (!compact && _shouldShow('hits', showFilter)) {
+        var dfPh = _renderPatternHits(report.patternHits, df.path, opts.verbose);
         for (var dpi = 0; dpi < dfPh.length; dpi++) lines.push(dfPh[dpi]);
       }
 
@@ -851,13 +894,13 @@ function _renderDirectory(report, opts) {
       }
 
       // Exposure for this file
-      if (_shouldShow('exposure', showFilter)) {
+      if (!compact && _shouldShow('exposure', showFilter)) {
         var dfExp = _renderExposure(report.exposure, df.path);
         for (var dei = 0; dei < dfExp.length; dei++) lines.push(dfExp[dei]);
       }
 
       // Review for this file
-      if (_shouldShow('review', showFilter)) {
+      if (!compact && _shouldShow('review', showFilter)) {
         var dfRv = _renderReview(report.review, df.path, opts.verbose);
         for (var dri = 0; dri < dfRv.length; dri++) lines.push(dfRv[dri]);
       }

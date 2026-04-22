@@ -94,6 +94,36 @@ function countLines(str) {
 }
 
 // ---------------------------------------------------------------------------
+// printHitContext — print snippet + fix before opening the viewer
+// ---------------------------------------------------------------------------
+function printHitContext(hit) {
+  var line        = hit.lineNumber || '?';
+  var ruleId      = hit.ruleId     || '';
+  var snippet     = hit.fullSnippet || hit.snippet || '';
+  var fix         = hit.fix        || '';
+
+  var headerBody  = 'L' + line + '  ' + ruleId;
+  var dashes      = '';
+  var dashCount   = Math.max(0, 52 - String(line).length - ruleId.length);
+  for (var i = 0; i < dashCount; i++) dashes += '\u2500';
+  var divider     = DIM + '\u2500\u2500 ' + headerBody + ' ' + dashes + RESET;
+  var closeDivider = DIM;
+  for (var j = 0; j < 60; j++) closeDivider += '\u2500';
+  closeDivider += RESET;
+
+  process.stdout.write('\n');
+  process.stdout.write('  ' + divider + '\n\n');
+  if (snippet) {
+    process.stdout.write('    ' + snippet + '\n\n');
+  }
+  if (fix) {
+    process.stdout.write('    \u2192 ' + fix + '\n\n');
+  }
+  process.stdout.write('  ' + closeDivider + '\n');
+  process.stdout.write('  ' + DIM + 'opening in ' + resolveEditor() + '...' + RESET + '\n\n');
+}
+
+// ---------------------------------------------------------------------------
 // --explain helpers
 // ---------------------------------------------------------------------------
 function _padRight(str, len) {
@@ -170,11 +200,13 @@ function collectAllHits(patternHits, basePath) {
   for (var i = 0; i < patternHits.length; i++) {
     var ph = patternHits[i];
     hits.push({
-      filePath:   pathMod.resolve(baseDir, ph.file),
-      fileName:   pathMod.basename(ph.file),
-      lineNumber: (ph.line || 0) + 1,   // ph.line is 0-based
-      ruleId:     ph.ruleId  || '',
-      snippet:    (ph.source || '').slice(0, 72).trim(),
+      filePath:    pathMod.resolve(baseDir, ph.file),
+      fileName:    pathMod.basename(ph.file),
+      lineNumber:  (ph.line || 0) + 1,   // ph.line is 0-based
+      ruleId:      ph.ruleId  || '',
+      snippet:     (ph.source || '').slice(0, 72).trim(),
+      fullSnippet: (ph.source || '').trim(),
+      fix:         ph.fix    || '',
     });
   }
   // Sort by filePath first, then lineNumber ascending within each file
@@ -400,6 +432,7 @@ function runHitNavigator(hits, tagIndex, activeTag, exitCode) {
     var h = hits[cursor];
     stdin.setRawMode(false);
     stdin.pause();
+    printHitContext(h);
     openFileAtLine(h.filePath, h.lineNumber);
     stdin.resume();
     stdin.setRawMode(true);

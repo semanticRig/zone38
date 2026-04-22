@@ -83,6 +83,17 @@ function openFileAtLine(filePath, lineNumber) {
 }
 
 // ---------------------------------------------------------------------------
+// countLines — count \n chars in a string (used by in-place redraw)
+// ---------------------------------------------------------------------------
+function countLines(str) {
+  var count = 0;
+  for (var i = 0; i < str.length; i++) {
+    if (str[i] === '\n') count++;
+  }
+  return count;
+}
+
+// ---------------------------------------------------------------------------
 // --explain helpers
 // ---------------------------------------------------------------------------
 function _padRight(str, len) {
@@ -212,12 +223,15 @@ function runTagPicker(tagIndex, allHits, exitCode) {
     return;
   }
 
+  var pickerLineCount = 0;
+  var pickerFirstDraw = true;
+
   function drawPicker() {
-    process.stdout.write('\n');
-    process.stdout.write(
-      '  ' + BOLD + 'SELECT CATEGORY' + RESET +
-      '  ' + DIM + '(' + allHits.length + ' total hit' + (allHits.length === 1 ? '' : 's') + ')' + RESET + '\n\n'
-    );
+    var out = '';
+    out += '\n';
+    out += '  ' + BOLD + 'SELECT CATEGORY' + RESET +
+           '  ' + DIM + '(' + allHits.length + ' total hit' + (allHits.length === 1 ? '' : 's') + ')' + RESET + '\n\n';
+
     for (var i = 0; i < tags.length; i++) {
       var tag      = tags[i];
       var count    = tagIndex[tag].length;
@@ -225,13 +239,19 @@ function runTagPicker(tagIndex, allHits, exitCode) {
       var marker   = selected ? CYAN + '\u25b6' + RESET : ' ';
       var tagLabel = selected ? BOLD + tag + RESET : DIM + tag + RESET;
       var countStr = DIM + '(' + count + ' hit' + (count === 1 ? '' : 's') + ')' + RESET;
-      process.stdout.write('  ' + marker + '  ' + tagLabel + '  ' + countStr + '\n');
+      out += '  ' + marker + '  ' + tagLabel + '  ' + countStr + '\n';
     }
-    process.stdout.write(
-      '\n  ' + DIM +
-      'j/k move  Enter select  a all hits  q/Q quit' +
-      RESET + '\n\n'
-    );
+
+    out += '\n  ' + DIM +
+           'j/k move  Enter select  a all hits  q/Q quit' +
+           RESET + '\n\n';
+
+    if (!pickerFirstDraw) {
+      process.stdout.write('\x1b[' + pickerLineCount + 'A\x1b[J');
+    }
+    pickerFirstDraw = false;
+    pickerLineCount = countLines(out);
+    process.stdout.write(out);
   }
 
   stdin.setRawMode(true);
@@ -329,6 +349,9 @@ function runHitNavigator(hits, tagIndex, activeTag, exitCode) {
     return;
   }
 
+  var navLineCount = 0;
+  var navFirstDraw = true;
+
   function drawList() {
     var total    = hits.length;
     var winStart = Math.max(0, cursor - Math.floor(MAX_VISIBLE / 2));
@@ -337,36 +360,40 @@ function runHitNavigator(hits, tagIndex, activeTag, exitCode) {
       winStart = Math.max(0, winEnd - MAX_VISIBLE);
     }
 
-    process.stdout.write('\n');
-    process.stdout.write(
-      '  ' + BOLD + label.toUpperCase() + RESET +
-      '  ' + DIM + '(' + total + ' hit' + (total === 1 ? '' : 's') + ')' + RESET + '\n\n'
-    );
+    var out = '';
+    out += '\n';
+    out += '  ' + BOLD + label.toUpperCase() + RESET +
+           '  ' + DIM + '(' + total + ' hit' + (total === 1 ? '' : 's') + ')' + RESET + '\n\n';
 
     var lastFile = null;
     for (var i = winStart; i < winEnd; i++) {
       var h = hits[i];
       if (h.filePath !== lastFile) {
-        process.stdout.write('  ' + DIM + '\u2014 ' + h.fileName + ' \u2014' + RESET + '\n');
+        out += '  ' + DIM + '\u2014 ' + h.fileName + ' \u2014' + RESET + '\n';
         lastFile = h.filePath;
       }
       var selected = (i === cursor);
       var marker   = selected ? CYAN + '\u25b6' + RESET : ' ';
       var lineStr  = DIM + 'L' + h.lineNumber + RESET;
       var snipStr  = DIM + h.snippet + RESET;
-      process.stdout.write('  ' + marker + '  ' + lineStr + '  ' + snipStr + '\n');
+      out += '  ' + marker + '  ' + lineStr + '  ' + snipStr + '\n';
     }
 
     if (total > MAX_VISIBLE) {
       var pct = Math.round((cursor / Math.max(total - 1, 1)) * 100);
-      process.stdout.write('\n  ' + DIM + pct + '%  \u2014  ' + total + ' total' + RESET + '\n');
+      out += '\n  ' + DIM + pct + '%  \u2014  ' + total + ' total' + RESET + '\n';
     }
 
-    process.stdout.write(
-      '\n  ' + DIM +
-      'j/k move  Enter open  q back to categories  Q quit' +
-      RESET + '\n\n'
-    );
+    out += '\n  ' + DIM +
+           'j/k move  Enter open  q back to categories  Q quit' +
+           RESET + '\n\n';
+
+    if (!navFirstDraw) {
+      process.stdout.write('\x1b[' + navLineCount + 'A\x1b[J');
+    }
+    navFirstDraw = false;
+    navLineCount = countLines(out);
+    process.stdout.write(out);
   }
 
   function openCurrent() {
@@ -376,6 +403,7 @@ function runHitNavigator(hits, tagIndex, activeTag, exitCode) {
     openFileAtLine(h.filePath, h.lineNumber);
     stdin.resume();
     stdin.setRawMode(true);
+    navFirstDraw = true;   // viewer output is on screen — append cleanly below it
     drawList();
   }
 

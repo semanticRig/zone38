@@ -25,6 +25,21 @@ function _verdict(score) {
 }
 
 // ---------------------------------------------------------------------------
+// Category → primary axis (mirrors the dominant weight in L13)
+// ---------------------------------------------------------------------------
+var _AXIS_B_CATS = { 'security': 1, 'config-exposure': 1, 'dependency': 1 };
+var _AXIS_C_CATS = {
+  'error-handling': 1, 'async-abuse': 1, 'structure-smell': 1,
+  'complexity-spike': 1, 'magic-values': 1, 'import-hygiene': 1, 'promise-graveyard': 1,
+};
+
+function _axisForCategory(cat) {
+  if (_AXIS_B_CATS[cat]) return 'B';
+  if (_AXIS_C_CATS[cat]) return 'C';
+  return 'A';
+}
+
+// ---------------------------------------------------------------------------
 // Collect secrets from findings across all files
 // ---------------------------------------------------------------------------
 function _collectSecrets(registry) {
@@ -37,7 +52,9 @@ function _collectSecrets(registry) {
       secrets.push({
         value:      _maskValue(f.value),
         file:       rec.relativePath || rec.path,
-        line:       f.lineIndex,
+        lineNumber: (f.lineIndex || 0) + 1,
+        axis:       'B',
+        ruleId:     null,
         confidence: f.confidence,
         signals:    f.signalCount || 0,
         shape:      f.shape || 'mixed',
@@ -69,10 +86,13 @@ function _collectExposure(registry) {
       var u = urls[j];
       if (u.classification === 'safe-external') continue;
       exposure.push({
+        value:          u.url,   // URL is already public in source — no masking
         url:            u.url,
         classification: u.classification,
         file:           rec.relativePath || rec.path,
-        line:           u.lineIndex,
+        lineNumber:     (u.lineIndex || 0) + 1,
+        axis:           'B',
+        ruleId:         null,
         internal:       u.internal || false,
         sensitivePath:  u.sensitivePath || false,
         querySecrets:   (u.queryFindings || []).length,
@@ -128,14 +148,16 @@ function _collectPatternHits(registry) {
     var ph = rec.patternHits || [];
     for (var j = 0; j < ph.length; j++) {
       hits.push({
-        ruleId:    ph[j].ruleId,
-        ruleName:  ph[j].ruleName,
-        category:  ph[j].category,
-        severity:  ph[j].severity,
-        file:      rec.relativePath || rec.path,
-        line:      ph[j].lineIndex,
-        source:    ph[j].line,
-        fix:       ph[j].fix,
+        ruleId:     ph[j].ruleId,
+        ruleName:   ph[j].ruleName,
+        category:   ph[j].category,
+        severity:   ph[j].severity,
+        file:       rec.relativePath || rec.path,
+        lineNumber: (ph[j].lineIndex || 0) + 1,
+        axis:       _axisForCategory(ph[j].category),
+        value:      ph[j].line || '',
+        source:     ph[j].line,
+        fix:        ph[j].fix,
       });
     }
   }
@@ -179,9 +201,11 @@ function _collectReview(registry) {
     for (var j = 0; j < rev.length; j++) {
       var r = rev[j];
       review.push({
-        value:         _maskValue(r.value),
+        value:         r.value || '',    // raw — user needs this to triage FP vs real finding
         file:          rec.relativePath || rec.path,
-        line:          r.lineIndex,
+        lineNumber:    (r.lineIndex || 0) + 1,
+        axis:          'B',
+        ruleId:        null,
         pipelineScore: r.pipelineScore || 0,
         signals:       r.signalCount || 0,
         shape:         r.shape || 'mixed',
@@ -237,6 +261,7 @@ module.exports = {
   // Expose for testing
   _verdict:              _verdict,
   _maskValue:            _maskValue,
+  _axisForCategory:      _axisForCategory,
   _collectSecrets:       _collectSecrets,
   _collectExposure:      _collectExposure,
   _collectSlopBreakdown: _collectSlopBreakdown,

@@ -23,6 +23,17 @@ var ROUTING_CHARS = '{};()[]<>';
 // If ≥50% of semicolon-separated segments are key=value pairs, it's a style literal.
 var KV_SEGMENT_RE = /^[\w.-]+=.+$/;
 
+// Dotted-path literals: i18n/l10n translation keys like "auth.login.invalid_password"
+// or "user.profile.avatar_url". The reliable discriminant is at least one underscore —
+// i18n frameworks consistently use snake_case leaf nodes. This prevents matching
+// hostnames (db.prod.internal) or package names (com.example.app) which have no
+// underscores and may legitimately be security findings.
+var DOTTED_PATH_RE = /^(?=.*_)[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/i;
+
+function _isDottedPathLiteral(value) {
+  return DOTTED_PATH_RE.test(value);
+}
+
 function _isStyleLiteral(value) {
   // Must contain at least one semicolon — the delimiter
   if (value.indexOf(';') === -1) return false;
@@ -115,6 +126,10 @@ function preflight(candidates, _fileRecord) {
     //    CSS/SVG/config style strings, not secrets (eliminates draw.io-style FPs)
     if ((c.type === 'string' || c.type === 'kv') && _isStyleLiteral(value)) continue;
 
+    // 2b. Dotted-path discard: i18n/l10n keys like "auth.login.invalid_password"
+    //     are namespaced identifiers, never secrets — discard before L07 math.
+    if ((c.type === 'string' || c.type === 'kv') && _isDottedPathLiteral(value)) continue;
+
     // 3. Entanglement filter: high symbol density in the left-biased window before
     //    this string means it is syntactically entangled — a regex operand, format
     //    argument, or template fragment — not an isolated credential assignment.
@@ -153,6 +168,7 @@ module.exports = {
   _lineRoutingDensity:    _lineRoutingDensity,
   _classTransitionCount:  _classTransitionCount,
   _isStyleLiteral:        _isStyleLiteral,
+  _isDottedPathLiteral:   _isDottedPathLiteral,
   _hash:                  _hash,
   _symbolDensityInWindow: _symbolDensityInWindow,
 };

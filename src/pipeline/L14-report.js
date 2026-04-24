@@ -86,7 +86,7 @@ function _collectExposure(registry) {
       var u = urls[j];
       if (u.classification === 'safe-external') continue;
       exposure.push({
-        value:          u.url,
+        value:          u.url,   // URL is already public in source — no masking
         url:            u.url,
         classification: u.classification,
         file:           rec.relativePath || rec.path,
@@ -201,7 +201,7 @@ function _collectReview(registry) {
     for (var j = 0; j < rev.length; j++) {
       var r = rev[j];
       review.push({
-        value:         _maskValue(r.value),
+        value:         r.value || '',    // raw — user needs this to triage FP vs real finding
         file:          rec.relativePath || rec.path,
         lineNumber:    (r.lineIndex || 0) + 1,
         axis:          'B',

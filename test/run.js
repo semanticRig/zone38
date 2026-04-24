@@ -551,6 +551,29 @@ var l05UrlStyleCands = [
 var l05UrlStyleResult = L05.preflight(l05UrlStyleCands, null);
 assert(l05UrlStyleResult.length === 1, 'preflight keeps url-type candidates even if they look like style strings');
 
+// _isDottedPathLiteral: i18n/l10n key detection
+assert(L05._isDottedPathLiteral('auth.login.invalid_password') === true,  'i18n key with underscores is dotted-path');
+assert(L05._isDottedPathLiteral('user.profile.avatar_url') === true,      'i18n key with underscore in leaf is dotted-path');
+assert(L05._isDottedPathLiteral('errors.not_found') === true,              'two-segment i18n key is dotted-path');
+assert(L05._isDottedPathLiteral('Auth.Login.Invalid_Password') === true,   'PascalCase i18n key with underscore is dotted-path');
+assert(L05._isDottedPathLiteral('db.prod.internal') === false,             'hostname without underscore is NOT dotted-path');
+assert(L05._isDottedPathLiteral('com.example.app') === false,              'package name without underscore is NOT dotted-path');
+assert(L05._isDottedPathLiteral('server.db.host') === false,               'config key without underscore is NOT dotted-path');
+assert(L05._isDottedPathLiteral('sk-proj-abc123def456') === false,         'API key is NOT dotted-path');
+assert(L05._isDottedPathLiteral('hello world') === false,                  'string with spaces is NOT dotted-path');
+assert(L05._isDottedPathLiteral('just-one-word') === false,                'no dots is NOT dotted-path');
+assert(L05._isDottedPathLiteral('.leading.dot_key') === false,             'leading dot is NOT dotted-path');
+assert(L05._isDottedPathLiteral('a.b') === false,                          'two-segment path without underscore is NOT dotted-path');
+
+// preflight: discards dotted-path literals (i18n false-positive guard)
+var l05I18nCands = [
+  { value: 'auth.login.invalid_password', line: 'var k = "auth.login.invalid_password"', col: 0, lineIndex: 0, type: 'string', priority: 'normal' },
+  { value: 'ghp_ABCDEFghijkl1234567890ab', line: 'var t = "ghp_ABCDEFghijkl1234567890ab"', col: 0, lineIndex: 1, type: 'string', priority: 'normal' },
+];
+var l05I18nResult = L05.preflight(l05I18nCands, null);
+assert(l05I18nResult.length === 1,                   'preflight discards i18n key, keeps real token');
+assert(l05I18nResult[0].value.indexOf('ghp_') === 0, 'kept candidate is the token, not the i18n key');
+
 // --- L12 Project-Level Calibration ---
 section('L12 — Project-level calibration');
 

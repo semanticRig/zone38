@@ -7,7 +7,7 @@
     "slopguard": "bin/slopguard.js"
   },
   "scripts": {
-    "test": "node test/run.js",
+    "test": "node test/run.js && node test/e2e.js",
     "selfcheck": "node bin/slopguard.js . --verbose"
   },
   "keywords": [

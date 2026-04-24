@@ -141,14 +141,14 @@ function findExplainTarget(report, lineNumber) {
   }
   if (allHits.length === 0) return null;
   return allHits.reduce(function(best, h) {
-    var hLine    = (h.line || 0) + 1; // convert to 1-based
-    var bestLine = (best.line || 0) + 1;
+    var hLine    = h.lineNumber || 1;
+    var bestLine = best.lineNumber || 1;
     return Math.abs(hLine - lineNumber) < Math.abs(bestLine - lineNumber) ? h : best;
   });
 }
 
 function printExplain(hit) {
-  var line = (hit.line || 0) + 1; // 1-based for display
+  var line = hit.lineNumber || 1;
   var SEP = DIM + '\u2500'.repeat(54) + RESET;
   process.stdout.write('\n');
   process.stdout.write('  ' + DIM + '\u2500\u2500 explain  L' + line + '  ' + SEP + RESET + '\n');
@@ -185,7 +185,7 @@ function printExplain(hit) {
 }
 
 // Collect ALL hits (not just first per file) as flat ordered array.
-// ph.file is relative path, ph.line is 0-based lineIndex, ph.source is line content.
+// ph.lineNumber is 1-based; ph.source is line content.
 function collectAllHits(patternHits, basePath) {
   var fs = require('fs');
   var pathMod = require('path');
@@ -202,7 +202,7 @@ function collectAllHits(patternHits, basePath) {
     hits.push({
       filePath:    pathMod.resolve(baseDir, ph.file),
       fileName:    pathMod.basename(ph.file),
-      lineNumber:  (ph.line || 0) + 1,   // ph.line is 0-based
+      lineNumber:  ph.lineNumber,
       ruleId:      ph.ruleId  || '',
       snippet:     (ph.source || '').slice(0, 72).trim(),
       fullSnippet: (ph.source || '').trim(),
@@ -493,52 +493,100 @@ function runHitNavigator(hits, tagIndex, activeTag, exitCode) {
 }
 
 function printHelp() {
-  var lines = [
-    '',
-    '  slopguard \u2014 Detects AI slop before your tech lead does.',
-    '',
-    '  USAGE',
-    '    slopguard <path> [options]',
-    '',
-    '  START HERE',
-    '    slopguard .                       scan, compact summary',
-    '    slopguard . -v -o                 scan, triage hits interactively',
-    '    slopguard . -j                    scan, JSON output for CI',
-    '',
-    '  DETAIL',
-    '    -v, --verbose       Per-file detail for flagged files',
-    '    -a, --all           Per-file detail for all files',
-    '    -f, --file=NAME     Per-file detail for one specific file',
-    '',
-    '  FOCUS',
-    '    -s, --show=SECTIONS Show only: hits secrets review exposure breakdown',
-    '    -o, --open          Interactive hit navigator (tag picker first)',
-    '                        j/k move  Enter select  q back  Q quit',
-    '',
-    '  OUTPUT',
-    '    -j, --json          JSON output',
-    '        --compact       Compact summary only (default when no flags set)',
-    '',
-    '  \u2500\u2500 advanced \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500',
-    '    -m, --mcp           Scan MCP server configs for risky patterns',
-    '    -A, --axis=A,B,C    Limit axes  A=Slop  B=Security  C=Quality',
-    '    -t, --threshold=A:N Override exit threshold  e.g. -t A:40,B:20',
-    '    -S, --since=REF     Scan only files changed since a git ref',
-    '                        e.g. --since=HEAD~1  --since=origin/main',
-    '        --explain=LINE  Full pipeline breakdown for one line number',
-    '',
-    '  EXAMPLES',
-    '    # Triage only security issues interactively',
-    '    slopguard ./src -v -s secrets -o',
-    '',
-    '    # PR check \u2014 only files changed vs main',
-    '    slopguard . --since=origin/main -j',
-    '',
-    '    # Full scan with custom CI thresholds',
-    '    slopguard . -j -A A,B -t A:40,B:20',
-    '',
-  ];
-  process.stdout.write(lines.join('\n') + '\n');
+  var SEP  = '  ' + DIM + (new Array(57).join('\u2500')) + RESET + '\n';
+  var NL   = '\n';
+  var o    = '';
+
+  // ── Header ────────────────────────────────────────────────────────────────
+  o += NL;
+  o += '  ' + BOLD + 'slopguard' + RESET + '  \u2014  Static analyser for AI-generated code patterns.\n';
+  o += '  Scans every file and produces a score (0\u2013100) across three axes:\n';
+  o += '  ' + BOLD + 'A  Slop' + RESET + ' \u00b7 ' + BOLD + 'B  Security' + RESET + ' \u00b7 ' + BOLD + 'C  Quality' + RESET + '\n';
+  o += NL;
+
+  // ── Quick start ───────────────────────────────────────────────────────────
+  o += '  ' + BOLD + 'QUICK START' + RESET + '\n';
+  o += SEP;
+  o += '  ' + CYAN + 'slopguard .' + RESET + '                     Scan current folder, compact summary\n';
+  o += '  ' + CYAN + 'slopguard ./src' + RESET + '                  Scan a specific directory\n';
+  o += '  ' + CYAN + 'slopguard . -v' + RESET + '                   Per-file breakdown of flagged files\n';
+  o += '  ' + CYAN + 'slopguard . -v -o' + RESET + '                Scan then triage hits interactively\n';
+  o += '  ' + CYAN + 'slopguard . -j' + RESET + '                   JSON output  (CI / pipelines)\n';
+  o += NL;
+
+  // ── Reading results ───────────────────────────────────────────────────────
+  o += '  ' + BOLD + 'READING YOUR RESULTS' + RESET + '\n';
+  o += SEP;
+  o += '  Each axis is scored 0\u2013100.  Higher = worse.\n';
+  o += NL;
+  o += '    ' + BOLD + 'A  Slop' + RESET + '       AI-pattern density    verbosity, dead code, over-engineering\n';
+  o += '    ' + BOLD + 'B  Security' + RESET + '   Risk signals            secrets, eval, injection vectors\n';
+  o += '    ' + BOLD + 'C  Quality' + RESET + '    Code health signals     debug logs, empty catch, magic values\n';
+  o += NL;
+  o += '  ' + BOLD + 'Score ranges\n' + RESET;
+  o += '    ' + BOLD + ' 0\u201310 ' + RESET + '  Clean         Nothing significant found\n';
+  o += '    ' + BOLD + '11\u201325 ' + RESET + '  Minimal       A few patterns worth noting\n';
+  o += '    ' + BOLD + '26\u201350 ' + RESET + '  Sloppy        Real issues present \u2014 review recommended\n';
+  o += '    ' + BOLD + '51\u201375 ' + RESET + '  Heavy         Significant AI-pattern load\n';
+  o += '    ' + BOLD + '76\u2013100' + RESET + '  Catastrophic  Do not ship\n';
+  o += NL;
+  o += '  ' + DIM + 'Exit code 0 = score \u2264 50.  Exit code 1 = score > 50  (CI gate).' + RESET + '\n';
+  o += NL;
+
+  // ── Options ───────────────────────────────────────────────────────────────
+  o += '  ' + BOLD + 'OPTIONS' + RESET + '\n';
+  o += SEP;
+  o += '  ' + DIM + 'Detail' + RESET + '\n';
+  o += '    ' + CYAN + '-v, --verbose' + RESET + '           Per-file breakdown for flagged files\n';
+  o += '    ' + CYAN + '-a, --all' + RESET + '               Per-file breakdown for every file\n';
+  o += '    ' + CYAN + '-f, --file=NAME' + RESET + '         Breakdown for one specific file\n';
+  o += NL;
+  o += '  ' + DIM + 'Filter' + RESET + '\n';
+  o += '    ' + CYAN + '-s, --show=SECTION' + RESET + '      Show only one section of the report\n';
+  o += '    ' + DIM  + '                         Sections: hits  secrets  review  exposure  breakdown' + RESET + '\n';
+  o += '    ' + CYAN + '-A, --axis=A,B,C' + RESET + '        Limit scan to specific axes\n';
+  o += '    ' + DIM  + '                         e.g.  -A B        (security only)\n';
+  o += '    ' +        '                         e.g.  -A A,B      (slop + security)' + RESET + '\n';
+  o += NL;
+  o += '  ' + DIM + 'Navigation' + RESET + '\n';
+  o += '    ' + CYAN + '-o, --open' + RESET + '              Interactive hit navigator (tag picker first)\n';
+  o += '    ' + DIM  + '                         j/k \u2191\u2193 move  \u00b7  Enter open file  \u00b7  q back  \u00b7  Q quit' + RESET + '\n';
+  o += NL;
+  o += '  ' + DIM + 'Output' + RESET + '\n';
+  o += '    ' + CYAN + '-j, --json' + RESET + '              Machine-readable JSON (CI / tooling)\n';
+  o += '        ' + CYAN + '--compact' + RESET + '           Summary only  (default when no flags are set)\n';
+  o += NL;
+
+  // ── Advanced ──────────────────────────────────────────────────────────────
+  o += '  ' + BOLD + 'ADVANCED' + RESET + '\n';
+  o += SEP;
+  o += '    ' + CYAN + '-m, --mcp' + RESET + '               Scan .vscode/mcp.json and .cursor/mcp.json\n';
+  o += '    ' + CYAN + '-S, --since=REF' + RESET + '         Scan only files changed since a git ref\n';
+  o += '    ' + DIM  + '                         e.g.  --since=HEAD~1   --since=origin/main' + RESET + '\n';
+  o += '    ' + CYAN + '-t, --threshold=A:N' + RESET + '     Override exit-code threshold per axis\n';
+  o += '    ' + DIM  + '                         e.g.  -t A:40,B:20' + RESET + '\n';
+  o += '        ' + CYAN + '--explain=LINE' + RESET + '      Deep signal breakdown for a line  (single file only)\n';
+  o += '    ' + DIM  + '                         Run a normal scan first to find line numbers,\n';
+  o += '    ' +        '                         then:  slopguard ./src/auth.js --explain=84' + RESET + '\n';
+  o += NL;
+
+  // ── Examples ──────────────────────────────────────────────────────────────
+  o += '  ' + BOLD + 'EXAMPLES' + RESET + '\n';
+  o += SEP;
+  o += '  Review only security hits, interactively\n';
+  o += '    ' + CYAN + 'slopguard ./src -v -s secrets -o' + RESET + '\n';
+  o += NL;
+  o += '  PR gate \u2014 scan only files changed vs main\n';
+  o += '    ' + CYAN + 'slopguard . --since=origin/main -j' + RESET + '\n';
+  o += NL;
+  o += '  CI with strict thresholds on Slop and Security\n';
+  o += '    ' + CYAN + 'slopguard . -j -A A,B -t A:40,B:20' + RESET + '\n';
+  o += NL;
+  o += '  Understand exactly why line 84 in auth.js was flagged\n';
+  o += '    ' + CYAN + 'slopguard ./src/auth.js --explain=84' + RESET + '\n';
+  o += NL;
+
+  process.stdout.write(o);
   process.exit(0);
 }
 

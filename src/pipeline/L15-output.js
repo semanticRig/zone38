@@ -324,7 +324,7 @@ function _renderPatternHits(hits, fileFilter, verbose) {
         var rColor = _categoryColor(rg.category);
         var rBadge = rColor + '[' + rg.ruleId + ']' + RESET;
         var rSev = _severityColor(rg.severity || 0);
-        var firstLines = rg.hits.slice(0, 3).map(function(h) { return 'L' + (h.line + 1); }).join(' ');
+        var firstLines = rg.hits.slice(0, 3).map(function(h) { return 'L' + h.lineNumber; }).join(' ');
         var more = rCount > 3 ? '  ' + DIM + '+' + (rCount - 3) + ' more' + RESET : '';
         var countLabel = rCount + ' hit' + (rCount === 1 ? '' : 's');
         lines.push(
@@ -343,7 +343,7 @@ function _renderPatternHits(hits, fileFilter, verbose) {
       var ph = group.hits[i];
       var sColor = _severityColor(ph.severity || 0);
       var cColor = _categoryColor(ph.category);
-      var lineTag = 'L' + (ph.line + 1);
+      var lineTag = 'L' + ph.lineNumber;
       var badge = cColor + '[' + ph.ruleId + ']' + RESET;
       var gutter = DIM + '\u2502' + RESET;
 
@@ -386,7 +386,7 @@ function _dedupeReview(items) {
   var seen = {};
   var out = [];
   for (var i = 0; i < items.length; i++) {
-    var key = items[i].line + ':' + (items[i].value || '');
+    var key = items[i].lineNumber + ':' + (items[i].value || '');
     if (seen[key]) continue;
     seen[key] = true;
     out.push(items[i]);
@@ -395,7 +395,7 @@ function _dedupeReview(items) {
 }
 
 function _renderReviewItem(rv) {
-  var lineNum = _padLeft('L' + (rv.line + 1), 6);
+  var lineNum = _padLeft('L' + rv.lineNumber, 6);
   var score = 'score=' + rv.pipelineScore.toFixed(2);
   var shape = _padRight(rv.shape || 'mixed', 14);
   var len = 'len=' + _padLeft(String(rv.valueLength || 0), 3);
@@ -497,7 +497,7 @@ function _renderSecrets(items, fileFilter) {
   lines.push('');
   for (var i = 0; i < filtered.length; i++) {
     var sec = filtered[i];
-    var lineNum = _padLeft('L' + (sec.line + 1), 6);
+    var lineNum = _padLeft('L' + sec.lineNumber, 6);
     var conf = sec.confidence;
     var shape = _padRight(sec.shape || 'mixed', 14);
     var len = 'len=' + _padLeft(String(sec.valueLength || 0), 3);
@@ -528,7 +528,7 @@ function _renderExposure(items, fileFilter) {
   lines.push('');
   for (var i = 0; i < filtered.length; i++) {
     var exp = filtered[i];
-    var lineNum = _padLeft('L' + (exp.line + 1), 6);
+    var lineNum = _padLeft('L' + exp.lineNumber, 6);
     lines.push('  ' + lineNum + '  ' + YELLOW + exp.url + RESET + '  '
       + DIM + exp.classification + '  ' + exp.file + RESET);
   }

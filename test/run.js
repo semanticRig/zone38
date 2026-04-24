@@ -1157,11 +1157,11 @@ var phVisReport = {
   perFile: [{ path: 'demo.js', axes: { A: 30, B: 15, C: 10 }, breakdown: {}, lineCount: 80, roleWeight: 1 }],
   secrets: [], exposure: [], review: [], slopBreakdown: [], cleanFiles: [],
   patternHits: [
-    { ruleId: 'empty-catch', ruleName: 'Empty catch', category: 'error-handling', severity: 8, file: 'demo.js', line: 4, source: 'catch(e) {}', fix: 'Handle error' },
-    { ruleId: 'console-log', ruleName: 'Console log', category: 'debug-pollution', severity: 5, file: 'demo.js', line: 10, source: 'console.log("debug")', fix: 'Remove debug log' },
-    { ruleId: 'dead-require', ruleName: 'Dead require', category: 'dead-code', severity: 4, file: 'demo.js', line: 1, source: "const x = require('unused')", fix: 'Remove unused import' },
-    { ruleId: 'hardcoded-secret', ruleName: 'Hardcoded secret', category: 'security', severity: 9, file: 'demo.js', line: 20, source: "const key = 'sk-abc123...'", fix: 'Use env variable' },
-    { ruleId: 'todo-comment', ruleName: 'TODO comment', category: 'debug-pollution', severity: 3, file: 'demo.js', line: 30, source: '// TODO: fix later', fix: 'Resolve or track in issue' },
+    { ruleId: 'empty-catch', ruleName: 'Empty catch', category: 'error-handling', severity: 8, file: 'demo.js', lineNumber: 5, source: 'catch(e) {}', fix: 'Handle error' },
+    { ruleId: 'console-log', ruleName: 'Console log', category: 'debug-pollution', severity: 5, file: 'demo.js', lineNumber: 11, source: 'console.log("debug")', fix: 'Remove debug log' },
+    { ruleId: 'dead-require', ruleName: 'Dead require', category: 'dead-code', severity: 4, file: 'demo.js', lineNumber: 2, source: "const x = require('unused')", fix: 'Remove unused import' },
+    { ruleId: 'hardcoded-secret', ruleName: 'Hardcoded secret', category: 'security', severity: 9, file: 'demo.js', lineNumber: 21, source: "const key = 'sk-abc123...'", fix: 'Use env variable' },
+    { ruleId: 'todo-comment', ruleName: 'TODO comment', category: 'debug-pollution', severity: 3, file: 'demo.js', lineNumber: 31, source: '// TODO: fix later', fix: 'Resolve or track in issue' },
   ],
 };
 

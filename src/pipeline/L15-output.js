@@ -331,6 +331,26 @@ function _renderPatternHits(hits, fileFilter, verbose) {
           '  ' + rBadge + '  ' + rSev + BOLD + countLabel + RESET +
           '  ' + DIM + '\u2014' + RESET + '  ' + firstLines + more
         );
+
+        // Show source snippet for top 2 examples (sorted by severity desc so the
+        // most impactful hit is shown first, not just whichever appeared first)
+        var gutter = DIM + '\u2502' + RESET;
+        var sortedExamples = rg.hits.slice().sort(function(a, b) {
+          return (b.severity || 0) - (a.severity || 0);
+        });
+        var examples = sortedExamples.slice(0, 2);
+        for (var ex = 0; ex < examples.length; ex++) {
+          var exHit = examples[ex];
+          if (exHit.source) {
+            var exSnippet = exHit.source.trim();
+            if (exSnippet.length > 72) exSnippet = exSnippet.substring(0, 71) + '\u2026';
+            lines.push(
+              '     ' + DIM + 'L' + _padRight(String(exHit.lineNumber), 4) + RESET +
+              gutter + ' ' + _highlight(exSnippet)
+            );
+          }
+        }
+
         if (rg.fix) {
           lines.push('     ' + GREEN + '\u2192 ' + rg.fix + RESET);
         }

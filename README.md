@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-  <img src="assets/logo-light.svg" alt="zone38" width="460">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/semanticRig/zone38/main/assets/logo-dark.svg">
+  <img src="https://raw.githubusercontent.com/semanticRig/zone38/main/assets/logo-light.svg" alt="zone38" width="460">
 </picture>
 
 <h3>Below 0.038, nothing is innocent.</h3>

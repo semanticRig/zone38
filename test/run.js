@@ -1877,7 +1877,7 @@ assert(!mcpOffResult.report.mcpFindings, 'mcp: no mcpFindings when --mcp not set
 section('CLI — --open flag');
 
 var execSync = require('child_process').execSync;
-var cliPath = path.join(__dirname, '..', 'bin', 'slopguard.js');
+var cliPath = path.join(__dirname, '..', 'bin', 'zone38.js');
 
 // --help includes --open
 var helpOut = execSync('node ' + cliPath + ' --help 2>&1', { encoding: 'utf8' });

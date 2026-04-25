@@ -661,7 +661,7 @@ function _renderSingleFile(report, opts) {
 
   // Header
   lines.push('');
-  lines.push(BOLD + 'SLOPGUARD v2' + RESET + DIM + '  \u00b7  ' + fileName
+  lines.push(BOLD + 'zone38' + RESET + DIM + '  \u00b7  ' + fileName
     + '  \u00b7  ' + _commaNum(lineCount) + ' lines' + RESET);
   lines.push('');
 
@@ -734,7 +734,7 @@ function _renderDirectory(report, opts) {
 
   // Header
   lines.push('');
-  lines.push(BOLD + 'SLOPGUARD v2' + RESET + DIM + '  \u00b7  ' + (opts.targetPath || '.')
+  lines.push(BOLD + 'zone38' + RESET + DIM + '  \u00b7  ' + (opts.targetPath || '.')
     + '  \u00b7  ' + (summary.fileCount || 0) + ' files'
     + '  \u00b7  ' + _commaNum(summary.totalLines || 0) + ' lines' + RESET);
   lines.push('');

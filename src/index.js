@@ -1,6 +1,6 @@
 'use strict';
 
-// Public API entry point for slopguard v2
+// Public API entry point for zone38
 
 var runner = require('./pipeline/runner');
 var L15 = require('./pipeline/L15-output');

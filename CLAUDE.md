@@ -1,7 +1,183 @@
 # CLAUDE.md
 
 ## Project Overview
-slopguard is a zero-dependency npm package that detects AI-generated code patterns ("AI slop") in JavaScript/TypeScript codebases. It gives every file and the whole project a Slop Score (0-100) and provides fix suggestions.
+zone38 is a zero-dependency npm package that detects AI-generated code patterns and security risks in JavaScript/TypeScript codebases. It scores every file and the whole project across three axes: A (Slop), B (Security), C (Quality).
+
+**"Below 0.038, nothing is innocent."**
+
+Two interfaces:
+- CLI: `npx zone38 .` or `npx zone38 ./src --mcp --verbose`
+- Library: `const { run, renderCli, renderJson, exitCode, DEFAULT_THRESHOLDS } = require('zone38')`
+
+## Tech Stack
+- Runtime: Node.js 16+ (CommonJS, `require`/`module.exports`)
+- Compression: `zlib` (Node.js built-in, used for NCD and compression ratio analysis)
+- File I/O: `fs`, `path` (Node.js built-in)
+- Output: Raw ANSI escape codes for CLI colors
+- Testing: Custom zero-dep test runner (`node test/run.js`)
+- Build step: NONE. Source IS distribution. No transpiler, no bundler.
+- Dependencies: ZERO. The `dependencies` field in `package.json` must stay empty. Forever.
+
+## Architecture
+
+```
+zone38/
+├── bin/
+│   └── zone38.js                  # CLI entry: arg parsing + pretty output ONLY
+├── src/
+│   ├── index.js                   # Public API: re-exports run, renderCli, renderJson, exitCode
+│   ├── rules.js                   # Pattern rules: array of plain detection objects
+│   └── pipeline/
+│       ├── L00-ingestion.js       # File registry + territory classification
+│       ├── L01-role.js            # Backend/frontend/test role detection
+│       ├── L02-surface.js         # Minification, repetition, routing density
+│       ├── L03-compression.js     # NCD + self-compression ratio (zlib)
+│       ├── L04-harvest.js         # String/URL candidate extraction
+│       ├── L05-preflight.js       # Dedup, style-literal filter, dotted-path filter
+│       ├── L06-herd.js            # Herd discrimination (IHD clustering)
+│       ├── L07-deep.js            # IC, CTF, entropy gradient per candidate
+│       ├── L08-arbitration.js     # Confidence gating: HIGH / MEDIUM / UNCERTAIN / SAFE
+│       ├── L09-url.js             # URL topology: internal-exposed, suspicious-external
+│       ├── L10-patterns.js        # Apply rules.js to each file line-by-line
+│       ├── L11-correlation.js     # Cross-file: duplicate secrets, slop clusters, clone pollution
+│       ├── L12-calibration.js     # Project-level Bayesian recalibration
+│       ├── L13-scoring.js         # Three-axis scoring (A/B/C, 0–100)
+│       ├── L14-report.js          # Report assembly: secrets, exposure, patternHits, review
+│       ├── L15-output.js          # CLI rendering + JSON output
+│       ├── mcp-scanner.js         # MCP config security scanner (--mcp flag)
+│       └── runner.js              # Orchestrator: chains L00–L14, returns report
+├── src/string/
+│   ├── aggregator.js              # Multi-signal aggregator
+│   ├── bigram.js                  # Bigram entropy analysis
+│   ├── char-frequency.js          # Character frequency + IC
+│   ├── compression.js             # Per-string compression ratio
+│   ├── decomposer.js              # Compound string decomposition (KV, JSON, URL params)
+│   ├── vector.js                  # Six-dimensional secret scoring vector
+│   └── vector-worker.js           # Async batch processor for vector scoring
+├── corpus/
+│   ├── human.js.gz                # Reference corpus: verified human-written JS
+│   └── ai.js.gz                   # Reference corpus: verified AI-generated JS
+├── templates/                     # Reserved for future YAML rule templates
+├── test/
+│   ├── run.js                     # Unit + integration test runner (590 tests)
+│   ├── e2e.js                     # End-to-end smoke tests
+│   └── fixtures/                  # Sample files: clean, sloppy, secrets, minified, etc.
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                 # GitHub Actions CI (Node 16/18/20/22/24)
+│       └── publish.yml            # npm publish on release tag
+├── CLAUDE.md                      # This file
+├── package.json
+├── README.md
+└── LICENSE                        # BSL 1.1
+```
+
+## Detection Architecture
+
+### Axis A — Slop (AI-pattern density)
+- **Compression texture** (L03): self-compression ratio. AI code compresses more due to structural repetitiveness.
+- **Pattern rules** (L10): 40+ rules in `src/rules.js` covering verbosity, dead code, scaffold residue, clone pollution, over-engineering.
+- **Calibration** (L12): Bayesian downweighting when a pattern appears across the whole project (not an outlier).
+
+### Axis B — Security (secrets + risky API exposure)
+- **Candidate harvest** (L04): extracts string literals and URLs from every line.
+- **Pre-flight filter** (L05): discards duplicates, style literals, dotted-path i18n keys, structural lines.
+- **Herd discrimination** (L06): discards uniform clusters (e.g. a list of identical-entropy hex IDs).
+- **Deep analysis** (L07): Index of Coincidence (IC), Class Transition Friction (CTF), Entropy Gradient per candidate.
+- **Arbitration** (L08): HIGH (pipeline ≥ 0.65 + 2 signals), MEDIUM (≥ 0.50 + 2 signals), UNCERTAIN (≥ 0.40), SAFE (discarded).
+- **URL topology** (L09): classifies URLs as internal-exposed, suspicious-external, or safe-external.
+- **MCP scanner** (mcp-scanner.js): optional `--mcp` flag scans `.vscode/mcp.json`, `.cursor/mcp.json`.
+
+### Axis C — Quality (code health)
+- Pattern rules from `src/rules.js` in categories: error-handling, async-abuse, debug-pollution, magic-values, naming-entropy.
+
+### Three core math signals (Security axis)
+- **Shannon Entropy**: `H = -Σ p_i log₂(p_i)` — character distribution uniformity
+- **Index of Coincidence**: `IC = Σ nᵢ(nᵢ−1) / N(N−1)` — zone38 threshold = 0.038
+- **Normalized Compression Distance**: `NCD(x,y) = (C(xy) − min(C(x),C(y))) / max(C(x),C(y))` — structural alienness
+
+All three must agree. Single-signal hits are discarded.
+
+## Rule Object Shape (strict)
+```js
+{
+  id: 'kebab-case-id',           // unique, stable, never renamed
+  name: 'Human-readable name',
+  category: 'verbosity',         // from fixed category list in rules.js
+  severity: 7,                   // 1 (nit) to 10 (critical)
+  description: 'Why this is a problem.',
+  test(line, ctx) {              // pure function, no side effects, no async
+    return boolean;              // true = this line fires the rule
+  },
+  fix: 'Actionable one-liner.',
+}
+```
+
+### ctx Object Shape
+```js
+{
+  filePath: '/abs/path/to/file.js',
+  lineIndex: 42,        // current line, 0-based
+  lines: ['line1', ...],
+  isBackend: true|false,
+  isFrontend: true|false,
+}
+```
+
+## CLI Behavior
+- Entry: `bin/zone38.js` handles ONLY arg parsing and presentation
+- All business logic lives in `src/`
+- Flags: `--verbose` / `-v`, `--all` / `-a`, `--json` / `-j`, `--mcp` / `-m`, `--open` / `-o`, `--show` / `-s`, `--axis` / `-A`, `--since` / `-S`, `--threshold` / `-t`, `--file` / `-f`, `--explain`, `--help`
+- Exit code 0: all axes within thresholds (defaults: A ≤ 50, B ≤ 25, C ≤ 100)
+- Exit code 1: any axis exceeds threshold
+
+## Strict Rules
+
+### Never Do
+- Add dependencies to `package.json`. Zero means zero.
+- Use `import`/`export` syntax. CommonJS only.
+- Add TypeScript, Babel, Webpack, Rollup, ESBuild, or any build tool.
+- Import `http`, `https`, `fetch`, `net`, `dns`. This tool is offline-only.
+- Use `eval()` or `new Function()`. We detect this.
+- Use `console.log` for debugging. We detect this.
+- Add AST parsing. Detection is regex + compression + entropy. By design.
+- Change CLI exit code thresholds without updating docs and tests.
+
+### Always Do
+- Keep functions pure where possible. No side effects in detection logic.
+- Comments explain WHY, not WHAT.
+- Descriptive variable names. No single-letter vars except tight loop iterators.
+- Every new rule gets a test fixture in `test/fixtures/`.
+- The codebase must pass zone38 itself with a low score. Eat the dog food.
+
+## Workflow Rules (Always Follow)
+For any task or feature:
+1. Break into small phases (3-5 max)
+2. Each phase on its own branch: `feature/phase-N-short-name`
+3. Implement ONLY that phase
+4. After finishing the phase: stop and say exactly
+   "Phase X complete on branch `feature/phase-N-short-name`.
+   Test it, then reply **'merge and next'** when ready."
+5. Only continue after user says "merge and next"
+
+## Testing
+- Run: `node test/run.js` (590 tests, zero dependencies)
+- E2E: `node test/e2e.js`
+- Fixtures in `test/fixtures/` trigger specific rules
+- Self-check: `node bin/zone38.js . --verbose` (score should stay low)
+- Check publishable content: `npm pack --dry-run`
+
+## Common Tasks
+| Task | Command |
+|------|---------|
+| Run CLI locally | `node bin/zone38.js . --verbose` |
+| Run tests | `node test/run.js` |
+| Self-check | `node bin/zone38.js . --json` |
+| Dry-run package | `npm pack --dry-run` |
+
+## Philosophy
+The irony is the point. This tool detects the exact patterns that AI coding assistants produce. If you're using an AI to contribute to this project, the code must pass zone38's own rules. The detection core is rooted in information theory (compression, entropy, IC) not pattern matching alone. Patterns expire. Math does not.
+
 
 **"Detects AI slop in your codebase before your tech lead does."**
 

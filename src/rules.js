@@ -1,6 +1,6 @@
 'use strict';
 
-// Pattern detection rules for slopguard
+// Pattern detection rules for zone38
 // Each rule: { id, name, category, severity, description, test(line, ctx), fix }
 // The test method is pure — no side effects, returns boolean
 

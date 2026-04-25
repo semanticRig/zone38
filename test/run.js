@@ -1,6 +1,6 @@
 'use strict';
 
-// slopguard test runner — zero dependencies
+// zone38 test runner — zero dependencies
 
 var path = require('path');
 var passed = 0;

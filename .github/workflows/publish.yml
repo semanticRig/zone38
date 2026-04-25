@@ -19,7 +19,7 @@ jobs:
       - name: Run tests
         run: node test/run.js
       - name: Self-scan
-        run: node bin/slopguard.js . --threshold=A:50,B:25
+        run: node bin/zone38.js . --threshold=A:50,B:25
       - name: Verify package version matches tag
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")

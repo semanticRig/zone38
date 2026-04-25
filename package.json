@@ -1,14 +1,14 @@
 {
-  "name": "slopguard",
-  "version": "2.0.0",
+  "name": "zone38",
+  "version": "0.0.1",
   "description": "Detects AI slop in your codebase before your tech lead does.",
   "main": "src/index.js",
   "bin": {
-    "slopguard": "bin/slopguard.js"
+    "zone38": "bin/zone38.js"
   },
   "scripts": {
     "test": "node test/run.js && node test/e2e.js",
-    "selfcheck": "node bin/slopguard.js . --verbose"
+    "selfcheck": "node bin/zone38.js . --verbose"
   },
   "keywords": [
     "ai",
@@ -18,8 +18,8 @@
     "lint",
     "security"
   ],
-  "author": "slopguard contributors",
-  "license": "MIT",
+  "author": "zone38 Contributors",
+  "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/semanticRig/slopguard.git"

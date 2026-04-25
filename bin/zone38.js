@@ -499,7 +499,7 @@ function printHelp() {
 
   // ── Header ────────────────────────────────────────────────────────────────
   o += NL;
-  o += '  ' + BOLD + 'slopguard' + RESET + '  \u2014  Static analyser for AI-generated code patterns.\n';
+  o += '  ' + BOLD + 'zone38' + RESET + '  \u2014  Static analyser for AI-generated code patterns.\n';
   o += '  Scans every file and produces a score (0\u2013100) across three axes:\n';
   o += '  ' + BOLD + 'A  Slop' + RESET + ' \u00b7 ' + BOLD + 'B  Security' + RESET + ' \u00b7 ' + BOLD + 'C  Quality' + RESET + '\n';
   o += NL;
@@ -507,11 +507,11 @@ function printHelp() {
   // ── Quick start ───────────────────────────────────────────────────────────
   o += '  ' + BOLD + 'QUICK START' + RESET + '\n';
   o += SEP;
-  o += '  ' + CYAN + 'slopguard .' + RESET + '                     Scan current folder, compact summary\n';
-  o += '  ' + CYAN + 'slopguard ./src' + RESET + '                  Scan a specific directory\n';
-  o += '  ' + CYAN + 'slopguard . -v' + RESET + '                   Per-file breakdown of flagged files\n';
-  o += '  ' + CYAN + 'slopguard . -v -o' + RESET + '                Scan then triage hits interactively\n';
-  o += '  ' + CYAN + 'slopguard . -j' + RESET + '                   JSON output  (CI / pipelines)\n';
+  o += '  ' + CYAN + 'zone38 .' + RESET + '                        Scan current folder, compact summary\n';
+  o += '  ' + CYAN + 'zone38 ./src' + RESET + '                     Scan a specific directory\n';
+  o += '  ' + CYAN + 'zone38 . -v' + RESET + '                      Per-file breakdown of flagged files\n';
+  o += '  ' + CYAN + 'zone38 . -v -o' + RESET + '                   Scan then triage hits interactively\n';
+  o += '  ' + CYAN + 'zone38 . -j' + RESET + '                      JSON output  (CI / pipelines)\n';
   o += NL;
 
   // ── Reading results ───────────────────────────────────────────────────────
@@ -567,23 +567,23 @@ function printHelp() {
   o += '    ' + DIM  + '                         e.g.  -t A:40,B:20' + RESET + '\n';
   o += '        ' + CYAN + '--explain=LINE' + RESET + '      Deep signal breakdown for a line  (single file only)\n';
   o += '    ' + DIM  + '                         Run a normal scan first to find line numbers,\n';
-  o += '    ' +        '                         then:  slopguard ./src/auth.js --explain=84' + RESET + '\n';
+  o += '    ' +        '                         then:  zone38 ./src/auth.js --explain=84' + RESET + '\n';
   o += NL;
 
   // ── Examples ──────────────────────────────────────────────────────────────
   o += '  ' + BOLD + 'EXAMPLES' + RESET + '\n';
   o += SEP;
   o += '  Review only security hits, interactively\n';
-  o += '    ' + CYAN + 'slopguard ./src -v -s secrets -o' + RESET + '\n';
+  o += '    ' + CYAN + 'zone38 ./src -v -s secrets -o' + RESET + '\n';
   o += NL;
   o += '  PR gate \u2014 scan only files changed vs main\n';
-  o += '    ' + CYAN + 'slopguard . --since=origin/main -j' + RESET + '\n';
+  o += '    ' + CYAN + 'zone38 . --since=origin/main -j' + RESET + '\n';
   o += NL;
   o += '  CI with strict thresholds on Slop and Security\n';
-  o += '    ' + CYAN + 'slopguard . -j -A A,B -t A:40,B:20' + RESET + '\n';
+  o += '    ' + CYAN + 'zone38 . -j -A A,B -t A:40,B:20' + RESET + '\n';
   o += NL;
   o += '  Understand exactly why line 84 in auth.js was flagged\n';
-  o += '    ' + CYAN + 'slopguard ./src/auth.js --explain=84' + RESET + '\n';
+  o += '    ' + CYAN + 'zone38 ./src/auth.js --explain=84' + RESET + '\n';
   o += NL;
 
   process.stdout.write(o);
@@ -609,7 +609,8 @@ var compactFlag = args.includes('--compact') || args.includes('-c');
 var sinceArg = null;
 for (var sai = 0; sai < args.length; sai++) {
   if (args[sai].indexOf('--since=') === 0) { sinceArg = args[sai].slice(8); break; }
-  if (args[sai].indexOf('-S=')     === 0) { sinceArg = args[sai].slice(3); break; }
+  if (args[sai].indexOf('-S=')      === 0) { sinceArg = args[sai].slice(3); break; }
+  if (args[sai] === '--since' || args[sai] === '-S') { sinceArg = args[sai + 1] || null; break; }
 }
 
 // --show=hits,secrets,review,exposure,breakdown  (-s, --show=)
@@ -617,6 +618,7 @@ var showArg = null;
 for (var si = 0; si < args.length; si++) {
   if (args[si].indexOf('--show=') === 0) { showArg = args[si].slice(7); break; }
   if (args[si].indexOf('-s=')     === 0) { showArg = args[si].slice(3); break; }
+  if (args[si] === '--show' || args[si] === '-s') { showArg = args[si + 1] || null; break; }
 }
 
 // --file=NAME  (-f, --file=)
@@ -624,6 +626,7 @@ var fileArg = null;
 for (var fi2 = 0; fi2 < args.length; fi2++) {
   if (args[fi2].indexOf('--file=') === 0) { fileArg = args[fi2].slice(7); break; }
   if (args[fi2].indexOf('-f=')     === 0) { fileArg = args[fi2].slice(3); break; }
+  if (args[fi2] === '--file' || args[fi2] === '-f') { fileArg = args[fi2 + 1] || null; break; }
 }
 
 // --axis=A,B,C  (-A, --axis=)
@@ -631,6 +634,7 @@ var axisArg = null;
 for (var ai = 0; ai < args.length; ai++) {
   if (args[ai].indexOf('--axis=') === 0) { axisArg = args[ai].slice(7); break; }
   if (args[ai].indexOf('-A=')     === 0) { axisArg = args[ai].slice(3); break; }
+  if (args[ai] === '--axis' || args[ai] === '-A') { axisArg = args[ai + 1] || null; break; }
 }
 
 // --threshold=A:N,B:N,C:N  (-t, --threshold=)
@@ -638,6 +642,7 @@ var thresholdArg = null;
 for (var ti = 0; ti < args.length; ti++) {
   if (args[ti].indexOf('--threshold=') === 0) { thresholdArg = args[ti].slice(12); break; }
   if (args[ti].indexOf('-t=')          === 0) { thresholdArg = args[ti].slice(3);  break; }
+  if (args[ti] === '--threshold' || args[ti] === '-t') { thresholdArg = args[ti + 1] || null; break; }
 }
 
 // Compact is default when no expansive flags are set
@@ -649,6 +654,11 @@ for (var eli = 0; eli < args.length; eli++) {
   if (args[eli].indexOf('--explain=') === 0) {
     var eln = parseInt(args[eli].slice(10), 10);
     if (!isNaN(eln) && eln > 0) explainLine = eln;
+    break;
+  }
+  if (args[eli] === '--explain') {
+    var eln2 = parseInt(args[eli + 1], 10);
+    if (!isNaN(eln2) && eln2 > 0) explainLine = eln2;
     break;
   }
 }
@@ -697,7 +707,7 @@ function getChangedFiles(sinceRef, basePath) {
 }
 
 if (!targetPath) {
-  process.stderr.write(YELLOW + '[slopguard] No path specified. Run with --help for usage.' + RESET + '\n');
+  process.stderr.write(YELLOW + '[zone38] No path specified. Run with --help for usage.' + RESET + '\n');
   process.exit(1);
 }
 

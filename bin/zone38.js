@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 zone38 Contributors
+// Licensed under the Business Source License 1.1 — see LICENSE for details.
 
 'use strict';
 

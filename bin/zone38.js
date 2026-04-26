@@ -812,10 +812,13 @@ if (openMode && !jsonMode) {
   var tagIndex = buildTagIndex(allHits);
   if (allHits.length === 0) {
     process.stdout.write('\n  No hits to navigate.\n\n');
-    process.exit(exitCodeVal);
+    // Use exitCode (not exit) so any pending stdout writes drain to a piped consumer.
+    process.exitCode = exitCodeVal;
   } else {
     runTagPicker(tagIndex, allHits, exitCodeVal);
   }
 } else {
-  process.exit(exitCodeVal);
+  // Use exitCode (not exit) so a large piped --json payload (>64KB pipe buffer)
+  // is fully flushed before the process terminates.
+  process.exitCode = exitCodeVal;
 }

@@ -599,6 +599,7 @@ if (args.includes('--help') || args.includes('-h')) {
 var path = require('path');
 var pipelineRunner = require('../src/pipeline/runner');
 var L15 = require('../src/pipeline/L15-output');
+var progressUi = require('../src/progress-ui');
 
 var verbose = args.includes('--verbose') || args.includes('-v');
 var jsonMode = args.includes('--json') || args.includes('-j');
@@ -733,6 +734,18 @@ if (sinceArg) {
 
 var result, report, exitCodeVal;
 
+function buildCompletionSummary(scanReport) {
+  var summary = (scanReport && scanReport.projectSummary) || {};
+  return {
+    fileCount:  summary.fileCount || 0,
+    totalLines: summary.totalLines || 0,
+    confirmed:  ((scanReport && scanReport.secrets) || []).length,
+    review:     ((scanReport && scanReport.review) || []).length,
+    exposure:   ((scanReport && scanReport.exposure) || []).length,
+    hits:       ((scanReport && scanReport.patternHits) || []).length,
+  };
+}
+
 if (scanTargets) {
   // --since mode: scan each changed file individually, track worst exit code
   exitCodeVal = 0;
@@ -760,8 +773,18 @@ if (scanTargets) {
   result = pipelineRunner.run(scanTargets[scanTargets.length - 1], { mcp: false });
   report = result.report;
 } else {
-  result = pipelineRunner.run(targetPath, { mcp: mcpMode });
-  report = result.report;
+  var scanUi = progressUi.createProgressUi({ json: jsonMode });
+  try {
+    result = pipelineRunner.run(targetPath, {
+      mcp: mcpMode,
+      progress: function (event) { scanUi.event(event); },
+    });
+    report = result.report;
+    scanUi.complete(buildCompletionSummary(report));
+  } catch (err) {
+    scanUi.stop();
+    throw err;
+  }
 
   if (jsonMode) {
     process.stdout.write(L15.renderJson(report) + '\n');

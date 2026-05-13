@@ -132,12 +132,23 @@ function _processFile(record, corpusDir) {
 // Full pipeline execution
 // ---------------------------------------------------------------------------
 
+function _emitProgress(progress, event) {
+  if (typeof progress !== 'function') return;
+  try {
+    progress(event);
+  } catch (_err) {}
+}
+
 function run(targetPath, opts) {
   opts = opts || {};
   var absPath = path.resolve(targetPath);
+  var progress = opts.progress;
+
+  _emitProgress(progress, { type: 'init', targetPath: absPath, note: 'initializing scan' });
 
   // L00 — Build registry (file discovery)
   var registry = L00.buildRegistry(absPath);
+  _emitProgress(progress, { type: 'discover', total: registry.length, targetPath: absPath });
 
   // Resolve corpus directory
   var corpusDir = path.join(__dirname, '..', '..', 'corpus');
@@ -145,12 +156,25 @@ function run(targetPath, opts) {
 
   // Per-file pipeline (L01 through L10)
   for (var i = 0; i < registry.length; i++) {
+    _emitProgress(progress, {
+      type:    'scan',
+      current: i + 1,
+      total:   registry.length,
+      file:    registry[i].relativePath || registry[i].path,
+    });
     _processFile(registry[i], corpusDir);
   }
 
   // MCP config scanning (when --mcp flag is set)
   var mcpResults = [];
   if (opts.mcp) {
+    _emitProgress(progress, {
+      type:    'scan',
+      current: registry.length,
+      total:   registry.length,
+      file:    '',
+      note:    'checking MCP config',
+    });
     mcpResults = mcpScanner.scan(absPath);
     for (var mi = 0; mi < mcpResults.length; mi++) {
       var mcpFile = mcpResults[mi];
@@ -217,4 +241,5 @@ function run(targetPath, opts) {
 module.exports = {
   run:          run,
   _processFile: _processFile,
+  _emitProgress: _emitProgress,
 };

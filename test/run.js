@@ -1321,6 +1321,20 @@ section('Pipeline Runner');
 
 var runner = require('../src/pipeline/runner.js');
 
+var runnerProgressEvents = [];
+runner.run('test/fixtures/clean.js', {
+  progress: function (event) { runnerProgressEvents.push(event); },
+});
+var runnerProgressTypes = runnerProgressEvents.map(function (event) { return event.type; });
+assert(runnerProgressTypes.indexOf('init') !== -1, 'runner: emits init progress event');
+assert(runnerProgressTypes.indexOf('discover') !== -1, 'runner: emits discover progress event');
+assert(runnerProgressTypes.indexOf('scan') !== -1, 'runner: emits scan progress event');
+var runnerDiscoverEvent = runnerProgressEvents.filter(function (event) { return event.type === 'discover'; })[0];
+assert(runnerDiscoverEvent.total === 1, 'runner: discover event includes file total');
+var runnerScanEvent = runnerProgressEvents.filter(function (event) { return event.type === 'scan'; })[0];
+assert(runnerScanEvent.current === 1 && runnerScanEvent.total === 1, 'runner: scan event includes current and total');
+assert(String(runnerScanEvent.file).indexOf('clean.js') !== -1, 'runner: scan event includes current file');
+
 // Run on fixtures directory
 var l15RunResult = runner.run('test/fixtures');
 assert(l15RunResult.report !== undefined, 'runner: returns report');
@@ -1990,6 +2004,8 @@ try {
 }
 var openJsonParsed = JSON.parse(openJsonOut.trim());
 assert(openJsonParsed.projectSummary !== undefined, 'cli: --open + --json still outputs valid JSON');
+assert(openJsonOut.indexOf('ANALYSIS PIPELINE') === -1, 'cli: --json does not include progress header');
+assert(openJsonOut.indexOf('phase matrix') === -1, 'cli: --json does not include progress frame');
 
 // --open is inert on clean files (no hits = no interactive prompt)
 var openCleanOut;
@@ -2018,6 +2034,9 @@ try {
   noOpenOut = e.stdout || '';
 }
 assert(typeof noOpenOut === 'string' && noOpenOut.length > 0, 'cli: normal run without --open works');
+assert(noOpenOut.indexOf('ANALYSIS PIPELINE') === -1, 'cli: non-TTY output does not include progress header');
+assert(noOpenOut.indexOf('phase matrix') === -1, 'cli: non-TTY output does not include live frame');
+assert(noOpenOut.indexOf('COMPLETE') === -1, 'cli: non-TTY output does not include completion card');
 
 // --- --show flag tests ---
 section('CLI --show flag');

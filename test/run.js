@@ -967,6 +967,94 @@ section('L15 — Output formatting');
 
 var L15 = require('../src/pipeline/L15-output.js');
 
+// --- Progress UI module ---
+section('Progress UI');
+
+var progressUi = require('../src/progress-ui.js');
+
+function captureStdout(isTTY, columns) {
+  var writes = [];
+  return {
+    isTTY: isTTY,
+    columns: columns,
+    write: function (chunk) { writes.push(String(chunk)); },
+    output: function () { return writes.join(''); },
+  };
+}
+
+function visibleBoxWidths(output) {
+  return progressUi.stripAnsi(output).split('\n').filter(function (line) {
+    return line.indexOf('  ┌') === 0 || line.indexOf('  │') === 0 || line.indexOf('  └') === 0;
+  }).map(function (line) { return line.length; });
+}
+
+function allEqual(values) {
+  if (values.length === 0) return false;
+  for (var aei = 1; aei < values.length; aei++) {
+    if (values[aei] !== values[0]) return false;
+  }
+  return true;
+}
+
+var progressFrame = progressUi.renderFrame({
+  phase: 'scan',
+  total: 40,
+  current: 12,
+  file: 'src/some/very/long/path/to/file.js',
+  startTime: 0,
+}, { columns: 120, version: '0.1.0', nowMs: 5600 });
+
+assert(progressFrame.indexOf('ANALYSIS PIPELINE') !== -1, 'progress-ui: frame includes ANALYSIS PIPELINE');
+assert(progressFrame.indexOf('phase matrix') !== -1, 'progress-ui: frame includes phase matrix');
+assert(progressFrame.indexOf('cadence') !== -1, 'progress-ui: frame includes cadence');
+assert(progressFrame.indexOf('30.0%') !== -1, 'progress-ui: frame includes scan percentage');
+
+var progressCard = progressUi.renderCompletionCard({
+  fileCount: 3,
+  totalLines: 120,
+  elapsedMs: 2500,
+  confirmed: 0,
+  review: 0,
+  exposure: 0,
+}, { columns: 120 });
+
+assert(progressCard.indexOf('COMPLETE') !== -1, 'progress-ui: completion card includes COMPLETE');
+assert(progressCard.indexOf('3 files') !== -1, 'progress-ui: completion card includes file count');
+assert(progressCard.indexOf('120 lines') !== -1, 'progress-ui: completion card includes line count');
+
+var narrowFrame = progressUi.renderFrame({
+  phase: 'scan',
+  total: 100,
+  current: 99,
+  file: 'src/this/is/a/very/long/path/that/must/truncate/in/the/middle/file.js',
+  startTime: 0,
+}, { columns: 22, version: '0.1.0', nowMs: 1000 });
+var narrowPlain = progressUi.stripAnsi(narrowFrame);
+assert(narrowPlain.indexOf('...') !== -1, 'progress-ui: narrow frame truncates with ellipsis');
+assert(allEqual(visibleBoxWidths(narrowFrame)), 'progress-ui: narrow frame keeps rectangular box');
+
+var wideFrame = progressUi.renderFrame({
+  phase: 'scan',
+  total: 400,
+  current: 375,
+  file: 'src/a/really/long/path/for/width/integrity/checks/with/many/segments/file.js',
+  startTime: 0,
+}, { columns: 160, version: '0.1.0', nowMs: 12345 });
+assert(allEqual(visibleBoxWidths(wideFrame)), 'progress-ui: wide frame visible box lines share width');
+
+var nonTtyCapture = captureStdout(false, 120);
+var nonTtyUi = progressUi.createProgressUi({ stdout: nonTtyCapture, version: '0.1.0' });
+nonTtyUi.event({ type: 'scan', current: 1, total: 2, file: 'src/a.js' });
+nonTtyUi.complete({ fileCount: 2, totalLines: 50, elapsedMs: 1000 });
+nonTtyUi.stop();
+assert(nonTtyCapture.output() === '', 'progress-ui: non-TTY no-op emits no frame');
+
+var jsonCapture = captureStdout(true, 120);
+var jsonUi = progressUi.createProgressUi({ stdout: jsonCapture, json: true, version: '0.1.0' });
+jsonUi.event({ type: 'scan', current: 1, total: 2, file: 'src/a.js' });
+jsonUi.complete({ fileCount: 2, totalLines: 50, elapsedMs: 1000 });
+assert(jsonCapture.output() === '', 'progress-ui: JSON mode no-op emits no frame');
+
 // --- Axis filter parsing ---
 assert(L15._parseAxisFilter(null) === null, 'L15 parseAxisFilter: null → null');
 assert(L15._parseAxisFilter('') === null, 'L15 parseAxisFilter: empty → null');

@@ -1022,6 +1022,17 @@ assert(progressCard.indexOf('COMPLETE') !== -1, 'progress-ui: completion card in
 assert(progressCard.indexOf('3 files') !== -1, 'progress-ui: completion card includes file count');
 assert(progressCard.indexOf('120 lines') !== -1, 'progress-ui: completion card includes line count');
 
+var progressCardSingular = progressUi.renderCompletionCard({
+  fileCount: 1,
+  totalLines: 31,
+  elapsedMs: 8,
+  rate: 125,
+  review: 2,
+}, { columns: 80 });
+var progressCardSingularPlain = progressUi.stripAnsi(progressCardSingular);
+assert(progressCardSingular.indexOf('1 file') !== -1, 'progress-ui: completion card uses singular file label');
+assert(progressCardSingularPlain.indexOf('cadence 125.00 f/s') !== -1, 'progress-ui: 80-column completion keeps full cadence');
+
 var narrowFrame = progressUi.renderFrame({
   phase: 'scan',
   total: 100,

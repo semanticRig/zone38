@@ -123,6 +123,11 @@ function formatNumber(num) {
   return str + out;
 }
 
+function formatCount(num, singular, plural) {
+  var normalized = Math.max(0, Math.floor(Number(num) || 0));
+  return formatNumber(normalized) + ' ' + (normalized === 1 ? singular : plural);
+}
+
 function normalizePhases(phases) {
   if (!Array.isArray(phases) || phases.length === 0) return DEFAULT_PHASES.slice();
   return phases.map(function (phase) {
@@ -264,7 +269,7 @@ function renderCompletionCard(summary, opts) {
   }
 
   var first = BOLD + 'COMPLETE' + RESET + '  ' +
-    formatNumber(fileCount) + ' files  ' + formatNumber(lineCount) + ' lines  ' +
+    formatCount(fileCount, 'file', 'files') + '  ' + formatCount(lineCount, 'line', 'lines') + '  ' +
     DIM + 'total ' + RESET + formatElapsed(elapsedMs) + '  ' +
     DIM + 'cadence ' + RESET + formatRate(rate);
   var second = renderCompletionSummary(summary);

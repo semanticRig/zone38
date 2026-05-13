@@ -8,7 +8,7 @@
 <h3>Below 0.038, nothing is innocent.</h3>
 
 <p>
-  <img src="https://img.shields.io/badge/version-0.0.1-0a0a0a?style=flat-square" alt="version">
+  <img src="https://img.shields.io/badge/version-0.1.0-0a0a0a?style=flat-square" alt="version">
   <img src="https://img.shields.io/badge/license-BSL--1.1-c0392b?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/dependencies-zero-2ecc71?style=flat-square" alt="zero dependencies">
   <img src="https://img.shields.io/badge/offline-100%25-2ecc71?style=flat-square" alt="offline">
@@ -81,6 +81,8 @@ Navigation
 Output
   -j, --json              Machine-readable JSON (CI / tooling)
 
+Interactive terminals show a live scan progress frame; JSON and piped output stay clean for automation.
+
 Advanced
   -m, --mcp               Scan .vscode/mcp.json and .cursor/mcp.json
   -S, --since=REF         Scan only files changed since a git ref
@@ -112,19 +114,25 @@ zone38 uses three mathematically independent signals. For a secret finding, all 
 
 **Signal 1 — Shannon Entropy**
 
-$$H(X) = -\sum_{i} p(x_i) \log_2 p(x_i)$$
+```
+H(X) = -∑ p(xᵢ) · log₂ p(xᵢ)
+```
 
 Measures how uniformly characters are distributed. A leaked credential has near-maximum entropy. A translation key does not. This signal is time-independent: it measures the mathematical structure of the data itself, not its format or naming convention.
 
 **Signal 2 — Index of Coincidence**
 
-$$IC = \frac{\sum_i n_i(n_i - 1)}{N(N-1)}$$
+```
+IC = ∑ nᵢ(nᵢ − 1) / N(N − 1)
+```
 
 Measures letter-frequency physics. Random cryptographic material approaches IC ≈ 0.038. Natural language approaches IC ≈ 0.065. Time-independent.
 
 **Signal 3 — Normalized Compression Distance**
 
-$$NCD(x, y) = \frac{C(xy) - \min(C(x), C(y))}{\max(C(x), C(y))}$$
+```
+NCD(x, y) = ( C(xy) − min(C(x), C(y)) ) / max(C(x), C(y))
+```
 
 Measures how structurally alien a string is relative to the code surrounding it. A real credential embedded in a UI component shares almost no structural DNA with that file. An i18n key does. Time-independent: compression distance is a property of the data, not the language or framework.
 

@@ -1,6 +1,6 @@
 {
   "name": "zone38",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Detects AI slop in your codebase before your tech lead does.",
   "main": "src/index.js",
   "bin": {

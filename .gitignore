@@ -10,5 +10,6 @@ PHASES.md
 solution/
 solutionV2/
 playground/
+zone38-ui-upgrade/
 .github/instructions/
 *.instructions.md
